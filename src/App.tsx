@@ -1,0 +1,1128 @@
+import { useEffect, useMemo, useRef, useState } from "react";
+import "./App.css";
+import { ProgressBar } from "./components/ProgressBar";
+import { ThemeSwitcher, type Theme } from "./components/ThemeSwitcher";
+import { VisualCharts } from "./components/VisualCharts";
+import { navItems, type View } from "./pages/routes";
+
+type Level = "First-time voter" | "School student" | "College learner" | "Civic volunteer";
+type ChatMessage = { role: "user" | "assistant"; text: string };
+type QuizQuestion = { question: string; options: string[]; answer: number; explanation: string };
+type UserProfile = { learningGoal: string; level: Level; profileName: string; profileRegion: string };
+type SignedInUser = { email: string; name: string; picture?: string };
+type Candidate = {
+  id: string;
+  name: string;
+  party: string;
+  color: string;
+  focus: string[];
+  strengths: string[];
+  weaknesses: string[];
+  policies: Record<string, string>;
+};
+
+const candidates: Candidate[] = [
+  {
+    id: "asha",
+    name: "Asha Rao",
+    party: "People First Alliance",
+    color: "#10b981",
+    focus: ["education", "healthcare", "women safety"],
+    strengths: ["Clear welfare agenda", "Strong local outreach", "Detailed education promises"],
+    weaknesses: ["Funding plan needs more detail", "Less emphasis on digital jobs"],
+    policies: {
+      Economy: "Skill centers and small-business grants",
+      Education: "Scholarships, teacher training, school infrastructure",
+      Healthcare: "Primary health clinics and mobile medical units",
+      Environment: "Waste management and clean water drives",
+    },
+  },
+  {
+    id: "kabir",
+    name: "Kabir Mehta",
+    party: "Development Front",
+    color: "#5b4df5",
+    focus: ["jobs", "infrastructure", "startups"],
+    strengths: ["Strong employment narrative", "Infrastructure-first plan", "Clear startup policy"],
+    weaknesses: ["Social equity section is lighter", "Environmental safeguards need clarity"],
+    policies: {
+      Economy: "Industrial corridors, apprenticeships, startup tax support",
+      Education: "Coding labs and vocational training",
+      Healthcare: "Public-private hospital upgrades",
+      Environment: "Green transport with phased targets",
+    },
+  },
+  {
+    id: "nisha",
+    name: "Nisha Khan",
+    party: "Clean Future Party",
+    color: "#f59e0b",
+    focus: ["transparency", "climate", "public transport"],
+    strengths: ["Strong anti-corruption pitch", "Climate-focused manifesto", "Public transport priority"],
+    weaknesses: ["Rural employment plan is less specific", "May need broader coalition support"],
+    policies: {
+      Economy: "Green jobs and transparent procurement",
+      Education: "Civic education and digital public libraries",
+      Healthcare: "Pollution-linked health monitoring",
+      Environment: "Air quality targets, public transport, climate resilience",
+    },
+  },
+];
+
+const baseQuiz: QuizQuestion[] = [
+  {
+    question: "What should a voter check before polling day?",
+    options: ["Campaign slogans", "Name in the voter list", "Weather forecast", "Exit polls"],
+    answer: 1,
+    explanation: "A citizen can vote only if their name appears on the electoral roll for that polling area.",
+  },
+  {
+    question: "What does VVPAT help a voter verify?",
+    options: ["Queue length", "Candidate spending", "Recorded vote choice", "Counting date"],
+    answer: 2,
+    explanation: "VVPAT briefly shows a paper slip so the voter can verify the selected candidate.",
+  },
+  {
+    question: "Why are elections sometimes held in phases?",
+    options: ["To confuse voters", "To manage logistics and security", "To avoid counting", "To reduce turnout"],
+    answer: 1,
+    explanation: "Phases help manage polling staff, equipment, security, and access across regions.",
+  },
+];
+
+const states = [
+  "India",
+  "Andhra Pradesh",
+  "Telangana",
+  "Tamil Nadu",
+  "Karnataka",
+  "Maharashtra",
+  "Delhi",
+  "Uttar Pradesh",
+  "West Bengal",
+  "Bihar",
+  "Kerala",
+  "Gujarat",
+  "Rajasthan",
+  "Madhya Pradesh",
+  "Odisha",
+  "Punjab",
+  "Haryana",
+  "Assam",
+  "Jharkhand",
+  "Chhattisgarh",
+  "Goa",
+  "Meghalaya",
+  "Mizoram",
+  "Nagaland",
+  "Tripura",
+  "Sikkim",
+  "Arunachal Pradesh",
+  "Manipur",
+  "Jammu and Kashmir",
+  "Puducherry",
+  "Chandigarh",
+];
+const dailyPlan = ["Day 1: Voting basics", "Day 2: EVM and VVPAT", "Day 3: Voter rights", "Day 4: Fake news check", "Day 5: Candidate comparison"];
+
+const regionDetails: Record<string, { issues: string[]; candidates: string[]; electionType: string }> = {
+  India: {
+    candidates: ["National candidate profiles", "State representatives", "Local constituency candidates"],
+    electionType: "Lok Sabha, Vidhan Sabha, local body elections",
+    issues: ["jobs", "education", "healthcare", "inflation", "public infrastructure"],
+  },
+  "Andhra Pradesh": {
+    candidates: ["Assembly candidate A", "Assembly candidate B", "Independent candidate"],
+    electionType: "Assembly, Lok Sabha, local body elections",
+    issues: ["capital development", "irrigation", "youth employment", "coastal infrastructure"],
+  },
+  Telangana: {
+    candidates: ["Urban development candidate", "Rural welfare candidate", "Independent candidate"],
+    electionType: "Assembly, Lok Sabha, municipal elections",
+    issues: ["urban transport", "farmer support", "IT jobs", "water supply"],
+  },
+  Delhi: {
+    candidates: ["Municipal candidate", "Assembly candidate", "Parliament candidate"],
+    electionType: "Assembly, Lok Sabha, municipal elections",
+    issues: ["air quality", "public transport", "education", "health services"],
+  },
+  Maharashtra: {
+    candidates: ["Urban infrastructure candidate", "Farmer welfare candidate", "Youth jobs candidate"],
+    electionType: "Assembly, Lok Sabha, municipal elections",
+    issues: ["farmer distress", "urban housing", "transport", "industry"],
+  },
+};
+
+const buildTutorPrompt = (question: string, level: Level, region: string, goal: string, name: string) => `You are CivicAI, a neutral AI election tutor.
+Learner name: ${name}
+Learner level: ${level}
+Region: ${region}
+Learning goal: ${goal}
+User question: ${question}
+
+Answer clearly with:
+1. Simple explanation
+2. Step-by-step breakdown
+3. Example
+4. One follow-up question
+
+Personalize the opening sentence. For example, if the learner is a first-time voter in India, begin with context like "Let me explain the basics for a first-time voter in India."
+Stay non-partisan. Do not ask the user to support a party or candidate.`;
+
+const fallbackTutor = (question: string, region: string) =>
+  `Here is a simple explanation for "${question}". Elections are a step-by-step democratic process where eligible citizens register, verify their names, compare candidates, vote privately, and then follow counting and results. In ${region}, users should always verify local details from official election sources because dates, constituencies, and candidate lists can vary.\n\nStep-by-step:\n1. Check eligibility and voter list.\n2. Learn the candidates and issues.\n3. Vote privately at the polling station.\n4. Follow verified result updates.\n\nFollow-up: Do you want this as a timeline or quiz?`;
+
+const analyzeNewsFallback = (text: string) => {
+  const lower = text.toLowerCase();
+  const redFlags = ["forwarded", "urgent", "secret", "guaranteed", "everyone must", "breaking!!!", "share now"];
+  const score = redFlags.filter((flag) => lower.includes(flag)).length;
+  if (!text.trim()) return "Paste a news claim to analyze it.";
+  if (score >= 2) return "Likely misleading. The claim uses urgency or viral-forwarding language. Verify it with official election sources and credible news outlets before sharing.";
+  if (lower.includes("election commission") || lower.includes("official")) return "Possibly credible, but still verify the date, source link, and whether the statement is from an official channel.";
+  return "Unclear. I do not see strong proof either way. Check source, date, author, official confirmation, and whether other credible outlets report the same claim.";
+};
+
+const analyzeManifestoFallback = (text: string) => {
+  if (!text.trim()) return "Paste manifesto text to summarize it.";
+  const promises = ["jobs", "education", "health", "women", "farmer", "climate", "transport", "tax"].filter((word) =>
+    text.toLowerCase().includes(word),
+  );
+  return `Summary: This manifesto focuses on ${promises.length ? promises.join(", ") : "public welfare and governance"}.\n\nKey promises:\n- Improve public services\n- Address voter concerns through policy commitments\n- Communicate development priorities\n\nSentiment: Mostly positive, because manifesto language usually emphasizes promises and benefits.\n\nWatch point: Ask how each promise will be funded, measured, and delivered.`;
+};
+
+const analyzeBiasFallback = (text: string) => {
+  const lower = text.toLowerCase();
+  const loadedWords = ["traitor", "anti-national", "destroy", "always", "never", "enemy", "only choice"];
+  const matches = loadedWords.filter((word) => lower.includes(word));
+  if (!text.trim()) return "Paste a political speech, article, or campaign message to check for bias.";
+  return `Bias signal: ${matches.length >= 2 ? "High" : matches.length === 1 ? "Medium" : "Low"}.
+
+Why:
+- Loaded language found: ${matches.length ? matches.join(", ") : "none obvious"}
+- Check whether the message gives evidence, source links, and space for opposing viewpoints.
+- Strong claims should be verified against official records and credible reporting.
+
+Suggestion: Rewrite the message using neutral language and verifiable facts.`;
+};
+
+const candidateFitFallback = (candidate: Candidate, goal: string) =>
+  `Based on your profile goal "${goal}", ${candidate.name} may fit if you care about ${candidate.focus.join(", ")}. Their strongest match is ${candidate.strengths[0].toLowerCase()}. A careful voter should also check the trade-off: ${candidate.weaknesses[0].toLowerCase()}.`;
+
+const parseQuizJson = (text: string) => {
+  const jsonBlock = text.trim().match(/```json\s*([\s\S]*?)```/i)?.[1];
+  const objectText = jsonBlock || text.trim().match(/\[[\s\S]*\]/)?.[0] || text;
+  const parsed = JSON.parse(objectText) as QuizQuestion[];
+  return parsed.filter((item) => item.question && item.options?.length === 4 && Number.isInteger(item.answer));
+};
+
+const getApiError = (status: number, details: string) => {
+  if (status === 403) return "Gemini key is blocked or API access is not enabled.";
+  if (status === 404) return "Gemini model not found.";
+  if (status === 429) return "Gemini quota or rate limit reached.";
+  if (details.toLowerCase().includes("api key")) return "Gemini API key looks invalid or restricted.";
+  return `Gemini failed with status ${status}.`;
+};
+
+export default function App() {
+  const resizeState = useRef<{
+    height: number;
+    left: number;
+    mode: "left" | "right" | "y" | "both";
+    startX: number;
+    startY: number;
+    target: HTMLElement;
+    width: number;
+  } | null>(null);
+  const [activeView, setActiveView] = useState<View>(() => {
+    const hashView = window.location.hash.replace("#/", "") as View;
+    return navItems.some((item) => item.id === hashView) || hashView === "settings" ? hashView : "dashboard";
+  });
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
+  const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+  const [theme, setTheme] = useState<Theme>(() => (localStorage.getItem("ballotbuddy-theme") as Theme) || "dark");
+  const savedProfile = (() => {
+    try {
+      return JSON.parse(localStorage.getItem("userProfile") || "null") as UserProfile | null;
+    } catch {
+      return null;
+    }
+  })();
+  const [profileName, setProfileName] = useState(savedProfile?.profileName || "Future Voter");
+  const [profileRegion, setProfileRegion] = useState(savedProfile?.profileRegion || "India");
+  const [learningGoal, setLearningGoal] = useState(savedProfile?.learningGoal || "Become election-ready");
+  const [level, setLevel] = useState<Level>(savedProfile?.level || "First-time voter");
+  const [profileSaved, setProfileSaved] = useState(false);
+  const [signedInUser, setSignedInUser] = useState<SignedInUser | null>(() => {
+    try {
+      const savedUser = JSON.parse(localStorage.getItem("signedInUser") || "null") as SignedInUser | null;
+      if (savedUser?.email === "learner@google.com") {
+        localStorage.removeItem("signedInUser");
+        return null;
+      }
+      return savedUser;
+    } catch {
+      return null;
+    }
+  });
+  const activeSignedInUser = signedInUser?.email === "learner@google.com" ? null : signedInUser;
+  const [notice, setNotice] = useState("Election workspace ready.");
+  const [chatInput, setChatInput] = useState("Explain Indian election system");
+  const [chatHistory, setChatHistory] = useState<ChatMessage[]>([
+    { role: "assistant", text: "Hi, I am CivicAI. Ask me about voting, parties, EVM, rights, fake news, or timelines." },
+  ]);
+  const [isListening, setIsListening] = useState(false);
+  const [isReading, setIsReading] = useState(false);
+  const [readingText, setReadingText] = useState("");
+  const [readingCharIndex, setReadingCharIndex] = useState(0);
+  const [votes, setVotes] = useState<Record<string, number>>({ asha: 14, kabir: 18, nisha: 11 });
+  const [lastVote, setLastVote] = useState<string | null>(null);
+  const [pendingVote, setPendingVote] = useState<Candidate | null>(null);
+  const [votedFor, setVotedFor] = useState<string | null>(null);
+  const [fitReason, setFitReason] = useState("");
+  const [fitLoading, setFitLoading] = useState(false);
+  const [candidateA, setCandidateA] = useState(candidates[0].id);
+  const [candidateB, setCandidateB] = useState(candidates[1].id);
+  const [newsText, setNewsText] = useState("Forwarded: secret EVM hack found, share now before voting closes!");
+  const [newsResult, setNewsResult] = useState("");
+  const [biasText, setBiasText] = useState("Only our party can save the nation. The other side will destroy everything.");
+  const [biasResult, setBiasResult] = useState("");
+  const [manifestoText, setManifestoText] = useState("We promise jobs, better schools, healthcare access, clean transport, and transparent governance.");
+  const [manifestoResult, setManifestoResult] = useState("");
+  const [quiz, setQuiz] = useState(baseQuiz);
+  const [difficulty, setDifficulty] = useState<"Easy" | "Medium" | "Hard">("Easy");
+  const [generatingQuiz, setGeneratingQuiz] = useState(false);
+  const [analyticsInsight, setAnalyticsInsight] = useState("Run AI insight to get a personalized learning recommendation.");
+  const [analyticsLoading, setAnalyticsLoading] = useState(false);
+  const [answers, setAnswers] = useState<Record<number, number>>({});
+  const [progress, setProgress] = useState<Record<number, boolean>>({ 0: true, 1: true });
+
+  useEffect(() => {
+    document.documentElement.dataset.theme = theme;
+    localStorage.setItem("ballotbuddy-theme", theme);
+  }, [theme]);
+
+  useEffect(() => {
+    window.history.replaceState(null, "", `#/${activeView}`);
+  }, [activeView]);
+
+  useEffect(() => {
+    const resizableElements = document.querySelectorAll<HTMLElement>(".card, .metric-card, .quiz-card, .feature-button");
+    resizableElements.forEach((element) => {
+      element.classList.add("resizable-js");
+      if (!element.querySelector(".resize-edge-right")) {
+        const right = document.createElement("span");
+        right.className = "resize-edge-right";
+        element.appendChild(right);
+      }
+      if (!element.querySelector(".resize-edge-left")) {
+        const left = document.createElement("span");
+        left.className = "resize-edge-left";
+        element.appendChild(left);
+      }
+      if (!element.querySelector(".resize-edge-bottom")) {
+        const bottom = document.createElement("span");
+        bottom.className = "resize-edge-bottom";
+        element.appendChild(bottom);
+      }
+      if (!element.querySelector(".resize-edge-corner")) {
+        const corner = document.createElement("span");
+        corner.className = "resize-edge-corner";
+        element.appendChild(corner);
+      }
+    });
+  });
+
+  useEffect(() => {
+    const onMouseDown = (event: MouseEvent) => {
+      const target = event.target as HTMLElement;
+      const mode = target.classList.contains("resize-edge-corner")
+        ? "both"
+        : target.classList.contains("resize-edge-right")
+          ? "right"
+          : target.classList.contains("resize-edge-left")
+            ? "left"
+            : target.classList.contains("resize-edge-bottom")
+              ? "y"
+              : null;
+
+      if (!mode) return;
+      const box = target.closest<HTMLElement>(".resizable-js");
+      if (!box) return;
+      const rect = box.getBoundingClientRect();
+      resizeState.current = {
+        height: rect.height,
+        left: box.offsetLeft,
+        mode,
+        startX: event.clientX,
+        startY: event.clientY,
+        target: box,
+        width: rect.width,
+      };
+      event.preventDefault();
+    };
+
+    const onMouseMove = (event: MouseEvent) => {
+      const state = resizeState.current;
+      if (!state) return;
+      if (state.mode === "right" || state.mode === "both") {
+        state.target.style.width = `${Math.max(260, state.width + event.clientX - state.startX)}px`;
+      }
+      if (state.mode === "left") {
+        const delta = event.clientX - state.startX;
+        const nextWidth = Math.max(260, state.width - delta);
+        const appliedDelta = state.width - nextWidth;
+        state.target.style.width = `${nextWidth}px`;
+        state.target.style.transform = `translateX(${appliedDelta}px)`;
+      }
+      if (state.mode === "y" || state.mode === "both") {
+        state.target.style.height = `${Math.max(160, state.height + event.clientY - state.startY)}px`;
+      }
+    };
+
+    const onMouseUp = () => {
+      resizeState.current = null;
+    };
+
+    document.addEventListener("mousedown", onMouseDown);
+    document.addEventListener("mousemove", onMouseMove);
+    document.addEventListener("mouseup", onMouseUp);
+    return () => {
+      document.removeEventListener("mousedown", onMouseDown);
+      document.removeEventListener("mousemove", onMouseMove);
+      document.removeEventListener("mouseup", onMouseUp);
+    };
+  }, []);
+
+  const quizScore = quiz.reduce((score, question, index) => score + (answers[index] === question.answer ? 1 : 0), 0);
+  const totalVotes = Object.values(votes).reduce((sum, value) => sum + value, 0);
+  const readiness = Math.min(98, Math.round(44 + quizScore * 11 + Object.values(progress).filter(Boolean).length * 7));
+  const selectedA = candidates.find((candidate) => candidate.id === candidateA) || candidates[0];
+  const selectedB = candidates.find((candidate) => candidate.id === candidateB) || candidates[1];
+  const bestFit = useMemo(() => {
+    const goal = learningGoal.toLowerCase();
+    return candidates
+      .map((candidate) => ({
+        candidate,
+        score: candidate.focus.filter((focus) => goal.includes(focus) || goal.includes(focus.split(" ")[0])).length,
+      }))
+      .sort((a, b) => b.score - a.score)[0].candidate;
+  }, [learningGoal]);
+  const selectedRegionDetails = regionDetails[profileRegion] || regionDetails.India;
+  const smartSuggestions = useMemo(() => {
+    const goal = learningGoal.toLowerCase();
+    if (goal.includes("education")) return ["EVM and VVPAT", "Candidate manifesto education promises", "How to verify school policy claims"];
+    if (goal.includes("job") || goal.includes("employment")) return ["Manifesto jobs promises", "Candidate comparison for employment", "How to detect fake jobs claims"];
+    if (goal.includes("health")) return ["Healthcare promises", "Public welfare schemes", "How to verify health misinformation"];
+    return ["Electoral process basics", "Voter rights", "Fake news detection"];
+  }, [learningGoal]);
+
+  useEffect(() => {
+    if (!activeSignedInUser) return;
+    const quizEntry = {
+      date: new Date().toISOString(),
+      level,
+      region: profileRegion,
+      score: quizScore,
+      total: quiz.length,
+    };
+    const previous = JSON.parse(localStorage.getItem("quizHistory") || "[]") as typeof quizEntry[];
+    localStorage.setItem("quizHistory", JSON.stringify([...previous.slice(-9), quizEntry]));
+  }, [level, profileRegion, quiz.length, quizScore, activeSignedInUser]);
+
+  const askGemini = async (prompt: string, fallback: string) => {
+    const apiKey = import.meta.env.VITE_GEMINI_API_KEY;
+    const model = import.meta.env.VITE_GEMINI_MODEL || "gemini-2.5-flash";
+    if (!apiKey) return fallback;
+
+    const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ contents: [{ parts: [{ text: prompt }] }], generationConfig: { temperature: 0.35 } }),
+    });
+    if (!response.ok) throw new Error(getApiError(response.status, await response.text()));
+    const data = await response.json();
+    return data.candidates?.[0]?.content?.parts?.[0]?.text || fallback;
+  };
+
+  const sendChat = async () => {
+    const question = chatInput.trim();
+    if (!question) return;
+    setChatHistory((current) => [...current, { role: "user", text: question }]);
+    setChatInput("");
+    setNotice("AI Tutor thinking...");
+    try {
+      const answer = await askGemini(buildTutorPrompt(question, level, profileRegion, learningGoal, profileName), fallbackTutor(question, profileRegion));
+      setChatHistory((current) => [...current, { role: "assistant", text: answer }]);
+      setNotice("AI Tutor answered successfully.");
+    } catch (error) {
+      const answer = fallbackTutor(question, profileRegion);
+      setChatHistory((current) => [...current, { role: "assistant", text: answer }]);
+      setNotice(`${error instanceof Error ? error.message : "AI unavailable."} Showing demo answer.`);
+    }
+  };
+
+  const startVoiceInput = () => {
+    const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+    if (!SpeechRecognition) {
+      setNotice("Voice input is not supported in this browser.");
+      return;
+    }
+    const recognition = new SpeechRecognition();
+    recognition.lang = "en-IN";
+    recognition.interimResults = false;
+    recognition.onstart = () => setIsListening(true);
+    recognition.onend = () => setIsListening(false);
+    recognition.onresult = (event: SpeechRecognitionEvent) => {
+      setChatInput(event.results[0][0].transcript);
+    };
+    recognition.start();
+  };
+
+  const speakLastAnswer = () => {
+    const lastAnswer = [...chatHistory].reverse().find((message) => message.role === "assistant");
+    if (!lastAnswer || !window.speechSynthesis) return;
+    window.speechSynthesis.cancel();
+    const utterance = new SpeechSynthesisUtterance(lastAnswer.text);
+    const voices = window.speechSynthesis.getVoices();
+    const preferredVoice =
+      voices.find((voice) => /female|woman|zira|susan|samantha|heera|veena/i.test(voice.name)) ||
+      voices.find((voice) => /en-IN|en-US|en-GB/i.test(voice.lang));
+    if (preferredVoice) utterance.voice = preferredVoice;
+    utterance.pitch = 1.12;
+    utterance.rate = 0.92;
+    utterance.onstart = () => setIsReading(true);
+    utterance.onboundary = (event) => {
+      if (event.charIndex >= 0) setReadingCharIndex(event.charIndex);
+    };
+    utterance.onend = () => {
+      setIsReading(false);
+      setReadingCharIndex(0);
+    };
+    utterance.onerror = () => {
+      setIsReading(false);
+      setReadingCharIndex(0);
+    };
+    setReadingText(lastAnswer.text);
+    setReadingCharIndex(0);
+    window.speechSynthesis.speak(utterance);
+  };
+
+  const castVote = () => {
+    if (!pendingVote || votedFor) return;
+    setVotes((current) => ({ ...current, [pendingVote.id]: current[pendingVote.id] + 1 }));
+    setLastVote(`TX-${pendingVote.id.toUpperCase()}-${String(totalVotes + 1).padStart(4, "0")}`);
+    setVotedFor(pendingVote.id);
+    setNotice(`Vote recorded for ${pendingVote.name}. Multiple voting is locked for this demo session.`);
+    setPendingVote(null);
+  };
+
+  const explainCandidateFit = async (candidate: Candidate) => {
+    const fallback = candidateFitFallback(candidate, learningGoal);
+    setFitLoading(true);
+    setNotice("Generating candidate fit explanation...");
+    try {
+      const answer = await askGemini(
+        `You are a neutral election learning assistant. Explain why this candidate may or may not fit the voter profile without persuading the voter.
+Voter goal: ${learningGoal}
+Region: ${profileRegion}
+Candidate: ${candidate.name}
+Party: ${candidate.party}
+Focus: ${candidate.focus.join(", ")}
+Strengths: ${candidate.strengths.join(", ")}
+Weaknesses: ${candidate.weaknesses.join(", ")}
+Give a balanced explanation in 4 short bullets.`,
+        fallback,
+      );
+      setFitReason(answer);
+      setNotice("Candidate fit explanation generated.");
+    } catch (error) {
+      setFitReason(fallback);
+      setNotice(`${error instanceof Error ? error.message : "AI unavailable."} Showing fit fallback.`);
+    } finally {
+      setFitLoading(false);
+    }
+  };
+
+  const runNewsCheck = async () => {
+    const fallback = analyzeNewsFallback(newsText);
+    setNotice("Checking election claim...");
+    try {
+      const answer = await askGemini(
+        `Analyze this election-related claim for misinformation. Return Likely true, Misleading, or Unclear with explanation:\n${newsText}`,
+        fallback,
+      );
+      setNewsResult(answer);
+      setNotice("Fake news detector finished.");
+    } catch (error) {
+      setNewsResult(fallback);
+      setNotice(`${error instanceof Error ? error.message : "AI unavailable."} Showing detector fallback.`);
+    }
+  };
+
+  const runManifesto = async () => {
+    const fallback = analyzeManifestoFallback(manifestoText);
+    setNotice("Analyzing manifesto...");
+    try {
+      const answer = await askGemini(
+        `Analyze this election manifesto. Give summary, key promises, sentiment, and questions voters should ask:\n${manifestoText}`,
+        fallback,
+      );
+      setManifestoResult(answer);
+      setNotice("Manifesto analyzer finished.");
+    } catch (error) {
+      setManifestoResult(fallback);
+      setNotice(`${error instanceof Error ? error.message : "AI unavailable."} Showing manifesto fallback.`);
+    }
+  };
+
+  const runBiasCheck = async () => {
+    const fallback = analyzeBiasFallback(biasText);
+    setNotice("Checking political bias...");
+    try {
+      const answer = await askGemini(
+        `Analyze this election speech/article for political bias. Give bias level, loaded words, missing context, and a neutral rewrite suggestion:\n${biasText}`,
+        fallback,
+      );
+      setBiasResult(answer);
+      setNotice("Bias detector finished.");
+    } catch (error) {
+      setBiasResult(fallback);
+      setNotice(`${error instanceof Error ? error.message : "AI unavailable."} Showing bias fallback.`);
+    }
+  };
+
+  const generateAnalyticsInsight = async () => {
+    const fallback = `You are improving in election knowledge. Your strongest area is ${quizScore > 1 ? "quiz understanding" : "guided learning progress"}, and you should next review ${smartSuggestions[0].toLowerCase()} for ${profileRegion}.`;
+    setAnalyticsLoading(true);
+    setNotice("Generating AI analytics insight...");
+    try {
+      const answer = await askGemini(
+        `You are an election learning analytics assistant. Give a concise personalized insight.
+Learner: ${profileName}
+Region: ${profileRegion}
+Goal: ${learningGoal}
+Quiz score: ${quizScore}/${quiz.length}
+Progress completed: ${Object.values(progress).filter(Boolean).length}/${dailyPlan.length}
+Suggest next 2 topics and one weak area. Stay educational and non-partisan.`,
+        fallback,
+      );
+      setAnalyticsInsight(answer);
+      setNotice("AI analytics insight generated.");
+    } catch (error) {
+      setAnalyticsInsight(fallback);
+      setNotice(`${error instanceof Error ? error.message : "AI unavailable."} Showing analytics fallback.`);
+    } finally {
+      setAnalyticsLoading(false);
+    }
+  };
+
+  const generateQuiz = async () => {
+    setAnswers({});
+    setGeneratingQuiz(true);
+    const fallback =
+      difficulty === "Hard"
+        ? [
+            ...baseQuiz,
+            {
+              question: "What is a key risk of political misinformation?",
+              options: ["Higher voter awareness", "Distorted voter decision-making", "More official sources", "Transparent counting"],
+              answer: 1,
+              explanation: "Misinformation can distort choices by spreading false or misleading claims.",
+            },
+          ]
+        : difficulty === "Medium"
+          ? [
+              ...baseQuiz,
+              {
+                question: "What is the best way to verify election information?",
+                options: ["Check official sources", "Trust all viral posts", "Ask only party workers", "Ignore dates"],
+                answer: 0,
+                explanation: "Official election sources and credible news reports are safer than viral claims.",
+              },
+              {
+                question: "Why should voters compare candidate manifestos?",
+                options: ["To memorize slogans", "To understand promises and priorities", "To avoid voting", "To predict exact results"],
+                answer: 1,
+                explanation: "Manifestos help voters compare policy priorities and promises.",
+              },
+            ]
+        : [
+            ...baseQuiz,
+            {
+              question: "What should a first-time voter carry to the polling station?",
+              options: ["Accepted identity document", "Party poster", "Mobile charger only", "Manifesto booklet"],
+              answer: 0,
+              explanation: "A voter should carry an accepted identity document and follow polling station rules.",
+            },
+            {
+              question: "What does voting by secret ballot mean?",
+              options: ["The vote is private", "The vote is public", "The vote is optional for officials", "The vote is counted later only"],
+              answer: 0,
+              explanation: "A secret ballot protects the privacy of the voter's choice.",
+            },
+          ];
+    try {
+      const answer = await askGemini(
+        `Create at least 5 ${difficulty} election education MCQs based on this learner's latest AI Tutor prompt: "${chatInput || chatHistory.filter((message) => message.role === "user").at(-1)?.text || learningGoal}".
+Learner level: ${level}
+Region: ${profileRegion}
+Learning goal: ${learningGoal}
+Return only valid JSON array. Shape: [{"question":"...","options":["A","B","C","D"],"answer":0,"explanation":"..."}].
+Make ${difficulty === "Hard" ? 7 : difficulty === "Medium" ? 6 : 5} questions.`,
+        JSON.stringify(fallback),
+      );
+      const parsed = parseQuizJson(answer);
+      setQuiz(parsed.length ? parsed : fallback);
+      setNotice("AI quiz generated.");
+    } catch (error) {
+      setQuiz(fallback);
+      setNotice(`${error instanceof Error ? error.message : "AI unavailable."} Showing quiz fallback.`);
+    } finally {
+      setGeneratingQuiz(false);
+    }
+  };
+
+  return (
+    <main className={`app-frame ${sidebarCollapsed ? "sidebar-collapsed" : ""} ${mobileMenuOpen ? "mobile-menu-open" : ""}`}>
+      <aside className="sidebar">
+        <div className="brand">
+          <strong>CivicAI</strong>
+          <span>AI Election Learning Platform</span>
+        </div>
+        <nav aria-label="Main navigation">
+          {navItems.map((item) => (
+            <button
+              key={item.id}
+              type="button"
+              className={activeView === item.id ? "active" : ""}
+              onClick={() => {
+                setActiveView(item.id);
+                setMobileMenuOpen(false);
+              }}
+            >
+              <span>{item.label}</span>
+            </button>
+          ))}
+        </nav>
+        <button
+          className={`profile-shortcut ${activeView === "settings" ? "active" : ""}`}
+          type="button"
+          onClick={() => {
+            setActiveView("settings");
+            setMobileMenuOpen(false);
+          }}
+        >
+          <span className="settings-symbol" aria-hidden="true">⚙️</span>
+          <div>
+            <strong>{activeSignedInUser ? activeSignedInUser.name : "Profile & Settings"}</strong>
+            <p>{activeSignedInUser ? "Google connected" : `${profileRegion} learner`}</p>
+          </div>
+        </button>
+      </aside>
+
+      <section className="main-panel">
+        <header className="topbar">
+          <div>
+            <button
+              className="mobile-menu-button"
+              type="button"
+              onClick={() => {
+                if (window.matchMedia("(max-width: 1080px)").matches) {
+                  setSidebarCollapsed(false);
+                  setMobileMenuOpen((current) => !current);
+                } else {
+                  setSidebarCollapsed((current) => !current);
+                }
+              }}
+            >
+              ☰
+            </button>
+            <p className="alert-label">ELECTION LEARNING WORKSPACE</p>
+            <h1>{navItems.find((item) => item.id === activeView)?.label || "Profile & Settings"}</h1>
+            <p>{notice}</p>
+          </div>
+          <div className="topbar-actions">
+            <button type="button" onClick={() => setActiveView("tutor")}>Open AI Tutor</button>
+          </div>
+        </header>
+
+        {activeView === "dashboard" && (
+          <section className="view-stack">
+            <article className="disclaimer-card">
+              <strong>Educational disclaimer</strong>
+              <p>This app is for election learning only. It does not provide official voting advice, party endorsement, or legal election guidance. Always verify critical election information with official election authorities.</p>
+            </article>
+            <div className="metrics-grid">
+              <article className="metric-card">
+                <div className="ring" style={{ "--score": readiness } as React.CSSProperties}>
+                  <span>{readiness}%</span>
+                  <small>READY</small>
+                </div>
+                <div className="risk-scale"><span>Weak areas</span><span>Learning</span><span>Mastered</span></div>
+              </article>
+              <article className="card">
+                <div className="card-title"><h2>Analytics dashboard</h2><span className="badge green">LIVE</span></div>
+                {["Quiz accuracy", "Topics mastered", "Fake-news awareness", "Profile completion"].map((label, index) => {
+                  const value = [quizScore * 25, 64, newsResult ? 88 : 42, profileSaved ? 100 : 55][index];
+                  return <ProgressBar key={label} label={label} value={value} />;
+                })}
+              </article>
+            </div>
+            <div className="feature-grid">
+              <FeatureButton title="AI Election Tutor" text="Voice input, chat history, follow-up questions" onClick={() => setActiveView("tutor")} />
+              <FeatureButton title="Smart Voting Simulator" text="Candidate cards, vote button, live chart, secure demo ID" onClick={() => setActiveView("simulator")} />
+              <FeatureButton title="Fake News Detector" text="Paste claims and detect misleading election content" onClick={() => setActiveView("detector")} />
+              <FeatureButton title="Manifesto Analyzer" text="Summarize promises, sentiment, and voter questions" onClick={() => setActiveView("manifesto")} />
+            </div>
+            <article className="card">
+              <div className="card-title"><h2>Personalized learning path</h2><span className="badge purple">{profileRegion}</span></div>
+              <div className="path-grid">
+                {dailyPlan.map((item, index) => (
+                  <button key={item} type="button" className={progress[index] ? "done" : ""} onClick={() => setProgress((current) => ({ ...current, [index]: !current[index] }))}>
+                    <span>Day {index + 1}</span>{item.replace(`Day ${index + 1}: `, "")}
+                  </button>
+                ))}
+              </div>
+            </article>
+            <article className="card">
+              <div className="card-title"><h2>Smart AI suggestions</h2><span className="badge green">PERSONALIZED</span></div>
+              <div className="suggestion-grid">
+                {smartSuggestions.map((suggestion) => (
+                  <button
+                    key={suggestion}
+                    type="button"
+                    onClick={() => {
+                      setChatInput(`Teach me about ${suggestion} for ${profileRegion}`);
+                      setActiveView("tutor");
+                    }}
+                  >
+                    {suggestion}
+                  </button>
+                ))}
+              </div>
+            </article>
+          </section>
+        )}
+
+        {activeView === "tutor" && (
+          <section className="two-column">
+            <article className="card tutor-card">
+              <div className="card-title"><h2>AI Election Tutor</h2><span className="badge green">VOICE + CHAT</span></div>
+              <div className="chat-window">
+                {chatHistory.map((message, index) => {
+                  const isActiveReading =
+                    isReading && message.role === "assistant" && message.text === readingText && index === chatHistory.length - 1;
+
+                  return (
+                    <div key={`${message.role}-${index}`} className={`chat ${message.role} ${isActiveReading ? "reading" : ""}`}>
+                      {isActiveReading ? <ReadingText text={message.text} charIndex={readingCharIndex} /> : message.text}
+                    </div>
+                  );
+                })}
+              </div>
+              <div className="chat-input-row">
+                <input value={chatInput} onChange={(event) => setChatInput(event.target.value)} onKeyDown={(event) => event.key === "Enter" && sendChat()} />
+                <button type="button" onClick={startVoiceInput}>{isListening ? "Listening..." : "Mic"}</button>
+                <button type="button" onClick={sendChat}>Send</button>
+                <button type="button" onClick={speakLastAnswer}>Speak</button>
+              </div>
+            </article>
+            <article className="card tutor-side-panel">
+              <div className="card-title"><h2>Try these prompts</h2><span className="badge purple">FOLLOW-UP</span></div>
+              {["Explain Indian election system", "Who are major parties?", "How does EVM work?", "What are voter rights?"].map((prompt) => (
+                <button className="wide-action" key={prompt} type="button" onClick={() => setChatInput(prompt)}>{prompt}</button>
+              ))}
+              <div className={`reading-guide ${isReading ? "active" : ""}`}>
+                <strong>{isReading ? "AI Tutor is reading now" : "Reading guide"}</strong>
+                <p>Follow the answer in this order while listening:</p>
+                <ol>
+                  <li>Simple explanation</li>
+                  <li>Step-by-step breakdown</li>
+                  <li>Example</li>
+                  <li>Follow-up question</li>
+                </ol>
+              </div>
+            </article>
+          </section>
+        )}
+
+        {activeView === "simulator" && (
+          <section className="view-stack">
+            <div className="candidate-grid">
+              {candidates.map((candidate) => (
+                <article className="card candidate-card" key={candidate.id}>
+                  <div className="candidate-avatar" style={{ background: candidate.color }}>{candidate.name.slice(0, 1)}</div>
+                  <h2>{candidate.name}</h2>
+                  <p>{candidate.party}</p>
+                  <div className="chips">{candidate.focus.map((focus) => <span key={focus}>{focus}</span>)}</div>
+                  <button className="secondary-button" type="button" onClick={() => explainCandidateFit(candidate)} disabled={fitLoading}>
+                    Why choose this candidate?
+                  </button>
+                  <button className="primary-button" type="button" onClick={() => setPendingVote(candidate)} disabled={Boolean(votedFor)}>
+                    {votedFor === candidate.id ? "Vote recorded" : votedFor ? "Voting locked" : "Vote"}
+                  </button>
+                </article>
+              ))}
+            </div>
+            <div className="two-column">
+              <article className="card">
+                <div className="card-title"><h2>Live results chart</h2><span className="badge green">{totalVotes} votes</span></div>
+                {candidates.map((candidate) => <ProgressBar key={candidate.id} label={candidate.name} value={Math.round((votes[candidate.id] / totalVotes) * 100)} />)}
+              </article>
+              <article className="card">
+                <div className="card-title"><h2>AI profile fit</h2><span className="badge purple">GEMINI</span></div>
+                <p>{fitReason || `Based on your goal, ${bestFit.name} may fit your profile because their focus areas include ${bestFit.focus.join(", ")}.`}</p>
+                <p className="muted">Secure voting demo ID: {lastVote || "Cast a vote to generate a transparent transaction ID."}</p>
+                <button className="secondary-button" type="button" onClick={() => explainCandidateFit(bestFit)} disabled={fitLoading}>
+                  Generate AI fit for best match
+                </button>
+                <button
+                  className="secondary-button"
+                  type="button"
+                  onClick={() => {
+                    setChatInput(`Explain whether ${bestFit.name} fits my voter profile: ${learningGoal}`);
+                    setActiveView("tutor");
+                  }}
+                >
+                  Continue in AI Tutor
+                </button>
+              </article>
+            </div>
+            <VisualCharts
+              values={candidates.map((candidate) => Math.round((votes[candidate.id] / totalVotes) * 100))}
+              labels={candidates.map((candidate) => candidate.name.split(" ")[0])}
+            />
+            {pendingVote && (
+              <div className="modal-backdrop" role="dialog" aria-modal="true" aria-label="Confirm vote">
+                <article className="card confirm-modal">
+                  <div className="card-title"><h2>Confirm your demo vote</h2><span className="badge purple">ONE VOTE</span></div>
+                  <p>You are about to cast a demo vote for <strong>{pendingVote.name}</strong>. This simulator prevents multiple votes in the same session.</p>
+                  <div className="modal-actions">
+                    <button className="secondary-button" type="button" onClick={() => setPendingVote(null)}>Cancel</button>
+                    <button className="primary-button" type="button" onClick={castVote}>Confirm vote</button>
+                  </div>
+                </article>
+              </div>
+            )}
+          </section>
+        )}
+
+        {activeView === "compare" && (
+          <section className="view-stack">
+            <article className="card compare-controls">
+              <select value={candidateA} onChange={(event) => setCandidateA(event.target.value)}>{candidates.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}</select>
+              <select value={candidateB} onChange={(event) => setCandidateB(event.target.value)}>{candidates.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}</select>
+            </article>
+            <div className="two-column">
+              <CandidateReport candidate={selectedA} />
+              <CandidateReport candidate={selectedB} />
+            </div>
+          </section>
+        )}
+
+        {activeView === "detector" && <TextAnalyzer title="Fake News Detector" badge="MISINFO CHECK" text={newsText} setText={setNewsText} result={newsResult} run={runNewsCheck} placeholder="Paste election news or social media claim..." />}
+        {activeView === "manifesto" && <TextAnalyzer title="Manifesto Analyzer" badge="POLICY SUMMARY" text={manifestoText} setText={setManifestoText} result={manifestoResult} run={runManifesto} placeholder="Paste manifesto text..." />}
+        {activeView === "bias" && <TextAnalyzer title="Bias Detector" badge="SPEECH CHECK" text={biasText} setText={setBiasText} result={biasResult} run={runBiasCheck} placeholder="Paste political speech, article, or campaign text..." />}
+
+        {activeView === "quiz" && (
+          <section className="card">
+            <div className="card-title"><h2>Dynamic Quiz Lab</h2><span className="badge green">SCORE {quizScore}/{quiz.length}</span></div>
+            <div className="compare-controls">
+              <select value={difficulty} onChange={(event) => setDifficulty(event.target.value as "Easy" | "Medium" | "Hard")}><option>Easy</option><option>Medium</option><option>Hard</option></select>
+              <button className="primary-button" type="button" onClick={generateQuiz} disabled={generatingQuiz}>{generatingQuiz ? "Generating..." : "Generate quiz"}</button>
+            </div>
+            {quiz.map((question, questionIndex) => (
+              <article className="quiz-card" key={question.question}>
+                <strong>{question.question}</strong>
+                <div className="option-grid">
+                  {question.options.map((option, optionIndex) => {
+                    const selected = answers[questionIndex];
+                    const className = selected !== undefined && optionIndex === question.answer ? "correct" : selected === optionIndex ? "incorrect" : "";
+                    return <button className={className} key={option} type="button" onClick={() => setAnswers((current) => ({ ...current, [questionIndex]: optionIndex }))}><span>{String.fromCharCode(65 + optionIndex)}</span>{option}</button>;
+                  })}
+                </div>
+                {answers[questionIndex] !== undefined && <p className="muted">{question.explanation}</p>}
+              </article>
+            ))}
+          </section>
+        )}
+
+        {activeView === "analytics" && (
+          <section className="view-stack">
+            <div className="two-column">
+              <article className="card"><div className="card-title"><h2>Score trends</h2><span className="badge green">TRACKING</span></div>{[55, 62, 74, readiness].map((v, i) => <ProgressBar key={i} label={`Session ${i + 1}`} value={v} />)}<VisualCharts values={[55, 62, 74, readiness]} labels={["S1", "S2", "S3", "Now"]} /></article>
+              <article className="card"><div className="card-title"><h2>Region-based content</h2><span className="badge purple">{profileRegion}</span></div><select value={profileRegion} onChange={(e) => setProfileRegion(e.target.value)}>{states.map((s) => <option key={s}>{s}</option>)}</select><p className="muted region-copy">Election types: {selectedRegionDetails.electionType}</p><div className="local-grid"><article><strong>Local issues</strong>{selectedRegionDetails.issues.map((issue) => <span key={issue}>{issue}</span>)}</article><article><strong>Sample candidates</strong>{selectedRegionDetails.candidates.map((candidate) => <span key={candidate}>{candidate}</span>)}</article></div></article>
+            </div>
+            <article className="card"><div className="card-title"><h2>Bias detector demo</h2><span className="badge red">SPEECH CHECK</span></div><p>This module flags loaded language, one-sided claims, missing sources, and emotional manipulation in election speeches or articles.</p><ProgressBar label="Potential bias in sample claim" value={68} /><VisualCharts values={[68, 22, 10]} labels={["Bias", "Neutral", "Missing"]} /></article>
+            <article className="card">
+              <div className="card-title"><h2>AI learning insight</h2><span className="badge green">GEMINI</span></div>
+              <p>{analyticsInsight}</p>
+              <button className="primary-button insight-button" type="button" onClick={generateAnalyticsInsight} disabled={analyticsLoading}>
+                {analyticsLoading ? "Generating..." : "Generate AI insight"}
+              </button>
+            </article>
+          </section>
+        )}
+
+        {activeView === "settings" && (
+          <section className="two-column">
+            <article className="card profile-card">
+              <div className="card-title"><h2>Learner profile</h2><span className="badge green">PERSONALIZED</span></div>
+              <GoogleSignInCard
+                key="google-sign-in-card-v4"
+                setSignedInUser={setSignedInUser}
+                setNotice={setNotice}
+              />
+              <label>Display name</label><input value={profileName} onChange={(event) => setProfileName(event.target.value)} />
+              <label>Region</label><input value={profileRegion} onChange={(event) => setProfileRegion(event.target.value)} />
+              <label>Learning goal</label><input value={learningGoal} onChange={(event) => setLearningGoal(event.target.value)} />
+              <label>Learner level</label><select value={level} onChange={(event) => setLevel(event.target.value as Level)}><option>First-time voter</option><option>School student</option><option>College learner</option><option>Civic volunteer</option></select>
+              <button className="primary-button" type="button" onClick={() => {
+                const profile = { learningGoal, level, profileName, profileRegion };
+                localStorage.setItem("userProfile", JSON.stringify(profile));
+                setProfileSaved(true);
+                setNotice("✅ Profile updated successfully. Your AI experience is now personalized.");
+              }}>Save profile</button>
+              {profileSaved && <p className="save-confirmation">✅ Profile updated successfully.</p>}
+            </article>
+            <article className="card"><div className="card-title"><h2>Your AI Experience</h2><span className="badge purple">PERSONALIZED</span></div><div className="experience-grid"><article><span>Region</span><strong>{profileRegion}</strong></article><article><span>Level</span><strong>{level}</strong></article><article><span>Focus</span><strong>{learningGoal}</strong></article><article><span>Saved progress</span><strong>{activeSignedInUser ? "Enabled" : "Sign in to enable"}</strong></article></div><div className="settings-block"><strong>Theme</strong><ThemeSwitcher theme={theme} setTheme={setTheme} /></div></article>
+          </section>
+        )}
+      </section>
+    </main>
+  );
+}
+
+function GoogleSignInCard({
+  setNotice,
+  setSignedInUser,
+}: {
+  setNotice: (notice: string) => void;
+  setSignedInUser: (user: SignedInUser | null) => void;
+}) {
+  const [chooserOpen, setChooserOpen] = useState(false);
+  const [accountEmail, setAccountEmail] = useState("");
+  const [accountName, setAccountName] = useState("");
+
+  const signInWithGoogle = () => {
+    setChooserOpen(true);
+    setNotice("Choose an account to continue with Google.");
+  };
+
+  const connectSelectedAccount = () => {
+    const fallbackEmail = "learner@civicai.local";
+    const email = accountEmail.trim() || fallbackEmail;
+    const name = accountName.trim() || email.split("@")[0] || "Google Learner";
+    const user = { email, name };
+    localStorage.setItem("signedInUser", JSON.stringify(user));
+    setSignedInUser(user);
+    setChooserOpen(false);
+    setNotice("Google account selected. Profile, quiz scores, and progress will be saved locally.");
+  };
+
+  return (
+    <>
+      <section className="google-card">
+        <div>
+          <strong>Google Sign-In</strong>
+          <p>Use your Google account to save profile, quiz scores, progress, and personalization.</p>
+        </div>
+        <button className="custom-google-button" type="button" onClick={signInWithGoogle}>
+          <img
+            alt=""
+            aria-hidden="true"
+            className="google-logo"
+            src="https://www.gstatic.com/firebasejs/ui/2.0.0/images/auth/google.svg"
+          />
+          Sign in with Google
+        </button>
+      </section>
+      {chooserOpen && (
+        <div className="modal-backdrop" role="dialog" aria-modal="true" aria-label="Choose Google account">
+          <article className="card confirm-modal google-chooser">
+            <div className="google-chooser-title">
+              <img alt="" aria-hidden="true" className="google-logo" src="https://www.gstatic.com/firebasejs/ui/2.0.0/images/auth/google.svg" />
+              <div>
+                <h2>Choose an account</h2>
+                <p>to continue to CivicAI</p>
+              </div>
+            </div>
+            <label>Email</label>
+            <input value={accountEmail} onChange={(event) => setAccountEmail(event.target.value)} placeholder="yourname@gmail.com" />
+            <label>Name</label>
+            <input value={accountName} onChange={(event) => setAccountName(event.target.value)} placeholder="Your name" />
+            <div className="modal-actions">
+              <button className="secondary-button" type="button" onClick={() => setChooserOpen(false)}>Cancel</button>
+              <button className="primary-button" type="button" onClick={connectSelectedAccount}>Continue</button>
+            </div>
+          </article>
+        </div>
+      )}
+    </>
+  );
+}
+
+function FeatureButton({ title, text, onClick }: { title: string; text: string; onClick: () => void }) {
+  return <button className="feature-button" type="button" onClick={onClick}><strong>{title}</strong><span>{text}</span></button>;
+}
+
+function CandidateReport({ candidate }: { candidate: Candidate }) {
+  return <article className="card candidate-report"><div className="card-title"><h2>{candidate.name}</h2><span className="badge purple">{candidate.party}</span></div><strong>Strengths</strong><ul>{candidate.strengths.map((item) => <li key={item}>{item}</li>)}</ul><strong>Weaknesses</strong><ul>{candidate.weaknesses.map((item) => <li key={item}>{item}</li>)}</ul><strong>Policies</strong>{Object.entries(candidate.policies).map(([key, value]) => <p key={key}><b>{key}:</b> {value}</p>)}</article>;
+}
+
+function TextAnalyzer({ title, badge, text, setText, result, run, placeholder }: { title: string; badge: string; text: string; setText: (text: string) => void; result: string; run: () => void; placeholder: string }) {
+  const isBias = title.toLowerCase().includes("bias");
+  const isFake = title.toLowerCase().includes("fake");
+  const values = isBias ? [64, 24, 12] : isFake ? [58, 28, 14] : [72, 18, 10];
+  const labels = isBias ? ["Biased", "Neutral", "Missing"] : isFake ? ["Misleading", "Unclear", "Credible"] : ["Positive", "Neutral", "Risk"];
+
+  return <section className="view-stack"><div className="two-column"><article className="card analyzer-card"><div className="card-title"><h2>{title}</h2><span className="badge red">{badge}</span></div><textarea value={text} onChange={(event) => setText(event.target.value)} placeholder={placeholder} /><button className="primary-button" type="button" onClick={run}>Analyze</button></article><article className="card prompt-card"><div className="card-title"><h2>AI Output</h2><span className="badge green">RESULT</span></div><pre>{result || "Run analysis to see output here."}</pre></article></div>{result && <VisualCharts values={values} labels={labels} />}</section>;
+}
+
+function ReadingText({ text, charIndex }: { text: string; charIndex: number }) {
+  const pieces = text.match(/\S+\s*|\s+/g) || [text];
+  const ranges = pieces.map((piece, index) => {
+    const start = pieces.slice(0, index).join("").length;
+    return { end: start + piece.length, start };
+  });
+  const activeIndex = ranges.findIndex((range) => charIndex >= range.start && charIndex <= range.end);
+
+  return (
+    <>
+      {pieces.map((piece, index) => (
+        <span key={`${piece}-${index}`} className={index === Math.max(activeIndex, 0) && piece.trim() ? "spoken-word" : ""}>
+          {piece}
+        </span>
+      ))}
+    </>
+  );
+}
+
+declare global {
+  interface Window {
+    google?: {
+      accounts?: {
+        oauth2?: {
+          initTokenClient: (config: {
+            callback: (response: { access_token?: string }) => void;
+            client_id: string;
+            scope: string;
+          }) => {
+          requestAccessToken: (options?: { prompt?: string }) => void;
+          };
+        };
+      };
+    };
+    SpeechRecognition?: new () => SpeechRecognition;
+    webkitSpeechRecognition?: new () => SpeechRecognition;
+  }
+
+  interface SpeechRecognition {
+    lang: string;
+    interimResults: boolean;
+    onstart: (() => void) | null;
+    onend: (() => void) | null;
+    onresult: ((event: SpeechRecognitionEvent) => void) | null;
+    start: () => void;
+  }
+}
