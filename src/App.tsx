@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
+import { AnimatePresence, motion } from "framer-motion";
 import "./App.css";
 import { ProgressBar } from "./components/ProgressBar";
-import { ThemeSwitcher, type Theme } from "./components/ThemeSwitcher";
 import { VisualCharts } from "./components/VisualCharts";
 import { navItems, type View } from "./pages/routes";
 
@@ -10,6 +10,7 @@ type ChatMessage = { role: "user" | "assistant"; text: string };
 type QuizQuestion = { question: string; options: string[]; answer: number; explanation: string };
 type UserProfile = { learningGoal: string; level: Level; profileName: string; profileRegion: string };
 type SignedInUser = { email: string; name: string; picture?: string };
+type ThemeMode = "dark" | "light";
 type Candidate = {
   id: string;
   name: string;
@@ -87,6 +88,48 @@ const baseQuiz: QuizQuestion[] = [
     options: ["To confuse voters", "To manage logistics and security", "To avoid counting", "To reduce turnout"],
     answer: 1,
     explanation: "Phases help manage polling staff, equipment, security, and access across regions.",
+  },
+  {
+    question: "What is democracy based on?",
+    options: ["Rule by one person", "Rule by citizens through elected representatives", "Rule by heredity", "Rule by military order"],
+    answer: 1,
+    explanation: "Democracy gives citizens a voice through voting, representation, rights, and accountability.",
+  },
+  {
+    question: "Which house of Parliament is directly elected by the people of India?",
+    options: ["Rajya Sabha", "Lok Sabha", "Vidhan Parishad", "Supreme Court"],
+    answer: 1,
+    explanation: "Lok Sabha members are directly elected by voters from parliamentary constituencies.",
+  },
+  {
+    question: "What is Rajya Sabha also known as?",
+    options: ["House of the People", "Council of States", "Election Commission", "State Assembly"],
+    answer: 1,
+    explanation: "Rajya Sabha is the Council of States and represents the states and union territories.",
+  },
+  {
+    question: "Who conducts elections in India at the national and state level?",
+    options: ["Election Commission of India", "Rajya Sabha Secretariat", "Local police only", "Political parties"],
+    answer: 0,
+    explanation: "The Election Commission of India supervises and conducts national and state elections.",
+  },
+  {
+    question: "What is the main role of Parliament?",
+    options: ["Make laws and hold the government accountable", "Run polling booths", "Select every voter", "Write party slogans"],
+    answer: 0,
+    explanation: "Parliament debates laws, passes budgets, represents citizens, and questions the government.",
+  },
+  {
+    question: "What does universal adult franchise mean?",
+    options: ["Only graduates can vote", "Every eligible adult citizen can vote", "Only taxpayers can vote", "Only officials can vote"],
+    answer: 1,
+    explanation: "Universal adult franchise means all eligible adult citizens have the right to vote without unfair discrimination.",
+  },
+  {
+    question: "What should citizens do before trusting election news?",
+    options: ["Forward it quickly", "Check official and credible sources", "Trust anonymous messages", "Ignore dates and context"],
+    answer: 1,
+    explanation: "Verifying sources, date, context, and official confirmation helps reduce misinformation.",
   },
 ];
 
@@ -208,6 +251,35 @@ Suggestion: Rewrite the message using neutral language and verifiable facts.`;
 const candidateFitFallback = (candidate: Candidate, goal: string) =>
   `Based on your profile goal "${goal}", ${candidate.name} may fit if you care about ${candidate.focus.join(", ")}. Their strongest match is ${candidate.strengths[0].toLowerCase()}. A careful voter should also check the trade-off: ${candidate.weaknesses[0].toLowerCase()}.`;
 
+const cleanAiText = (text: string) =>
+  text
+    .replace(/\*\*(.*?)\*\*/g, "$1")
+    .replace(/^\s*[-*]\s+/gm, "")
+    .replace(/\*/g, "")
+    .trim();
+
+function FormattedOutput({ fallback = "", text }: { fallback?: string; text: string }) {
+  const content = cleanAiText(text || fallback);
+  return (
+    <div className="ai-output-text">
+      {content.split(/\n+/).map((line, index) => {
+        const labelMatch = line.match(/^([\w\s/-]{2,42}:)\s*(.*)$/);
+        return (
+          <p key={`${line}-${index}`}>
+            {labelMatch ? (
+              <>
+                <strong>{labelMatch[1]}</strong> {labelMatch[2]}
+              </>
+            ) : (
+              line
+            )}
+          </p>
+        );
+      })}
+    </div>
+  );
+}
+
 const parseQuizJson = (text: string) => {
   const jsonBlock = text.trim().match(/```json\s*([\s\S]*?)```/i)?.[1];
   const objectText = jsonBlock || text.trim().match(/\[[\s\S]*\]/)?.[0] || text;
@@ -239,7 +311,7 @@ export default function App() {
   });
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
-  const [theme, setTheme] = useState<Theme>(() => (localStorage.getItem("ballotbuddy-theme") as Theme) || "dark");
+  const [themeMode, setThemeMode] = useState<ThemeMode>(() => (localStorage.getItem("civicai-theme") as ThemeMode) || "dark");
   const savedProfile = (() => {
     try {
       return JSON.parse(localStorage.getItem("userProfile") || "null") as UserProfile | null;
@@ -270,6 +342,7 @@ export default function App() {
   const [chatHistory, setChatHistory] = useState<ChatMessage[]>([
     { role: "assistant", text: "Hi, I am CivicAI. Ask me about voting, parties, EVM, rights, fake news, or timelines." },
   ]);
+  const [aiTyping, setAiTyping] = useState(false);
   const [isListening, setIsListening] = useState(false);
   const [isReading, setIsReading] = useState(false);
   const [readingText, setReadingText] = useState("");
@@ -290,16 +363,20 @@ export default function App() {
   const [manifestoResult, setManifestoResult] = useState("");
   const [quiz, setQuiz] = useState(baseQuiz);
   const [difficulty, setDifficulty] = useState<"Easy" | "Medium" | "Hard">("Easy");
+  const [quizTopic, setQuizTopic] = useState("Indian elections and Parliament");
   const [generatingQuiz, setGeneratingQuiz] = useState(false);
+  const [currentQuizIndex, setCurrentQuizIndex] = useState(0);
   const [analyticsInsight, setAnalyticsInsight] = useState("Run AI insight to get a personalized learning recommendation.");
   const [analyticsLoading, setAnalyticsLoading] = useState(false);
   const [answers, setAnswers] = useState<Record<number, number>>({});
   const [progress, setProgress] = useState<Record<number, boolean>>({ 0: true, 1: true });
+  const [onboardingVisible, setOnboardingVisible] = useState(() => localStorage.getItem("civicai-onboarding-seen") !== "true");
+  const [demoMode, setDemoMode] = useState(false);
 
   useEffect(() => {
-    document.documentElement.dataset.theme = theme;
-    localStorage.setItem("ballotbuddy-theme", theme);
-  }, [theme]);
+    document.documentElement.dataset.theme = themeMode;
+    localStorage.setItem("civicai-theme", themeMode);
+  }, [themeMode]);
 
   useEffect(() => {
     window.history.replaceState(null, "", `#/${activeView}`);
@@ -394,6 +471,10 @@ export default function App() {
   }, []);
 
   const quizScore = quiz.reduce((score, question, index) => score + (answers[index] === question.answer ? 1 : 0), 0);
+  const quizCompleted = quiz.length > 0 && Object.keys(answers).length >= quiz.length;
+  const badgeUnlocked = quizCompleted && quizScore >= Math.ceil(quiz.length * 0.7);
+  const answeredCount = Object.keys(answers).length;
+  const currentQuestion = quiz[Math.min(currentQuizIndex, Math.max(quiz.length - 1, 0))] || baseQuiz[0];
   const totalVotes = Object.values(votes).reduce((sum, value) => sum + value, 0);
   const readiness = Math.min(98, Math.round(44 + quizScore * 11 + Object.values(progress).filter(Boolean).length * 7));
   const selectedA = candidates.find((candidate) => candidate.id === candidateA) || candidates[0];
@@ -437,19 +518,23 @@ export default function App() {
     const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ contents: [{ parts: [{ text: prompt }] }], generationConfig: { temperature: 0.35 } }),
+      body: JSON.stringify({
+        contents: [{ parts: [{ text: `${prompt}\n\nFormatting rules: use plain text only, do not use markdown asterisks, and make section labels short like Summary:, Steps:, Example:, or Watch point:.` }] }],
+        generationConfig: { temperature: 0.35 },
+      }),
     });
     if (!response.ok) throw new Error(getApiError(response.status, await response.text()));
     const data = await response.json();
     return data.candidates?.[0]?.content?.parts?.[0]?.text || fallback;
   };
 
-  const sendChat = async () => {
-    const question = chatInput.trim();
+  const sendChat = async (promptOverride?: string) => {
+    const question = (promptOverride ?? chatInput).trim();
     if (!question) return;
     setChatHistory((current) => [...current, { role: "user", text: question }]);
     setChatInput("");
     setNotice("AI Tutor thinking...");
+    setAiTyping(true);
     try {
       const answer = await askGemini(buildTutorPrompt(question, level, profileRegion, learningGoal, profileName), fallbackTutor(question, profileRegion));
       setChatHistory((current) => [...current, { role: "assistant", text: answer }]);
@@ -458,6 +543,8 @@ export default function App() {
       const answer = fallbackTutor(question, profileRegion);
       setChatHistory((current) => [...current, { role: "assistant", text: answer }]);
       setNotice(`${error instanceof Error ? error.message : "AI unavailable."} Showing demo answer.`);
+    } finally {
+      setAiTyping(false);
     }
   };
 
@@ -618,57 +705,17 @@ Suggest next 2 topics and one weak area. Stay educational and non-partisan.`,
 
   const generateQuiz = async () => {
     setAnswers({});
+    setCurrentQuizIndex(0);
     setGeneratingQuiz(true);
-    const fallback =
-      difficulty === "Hard"
-        ? [
-            ...baseQuiz,
-            {
-              question: "What is a key risk of political misinformation?",
-              options: ["Higher voter awareness", "Distorted voter decision-making", "More official sources", "Transparent counting"],
-              answer: 1,
-              explanation: "Misinformation can distort choices by spreading false or misleading claims.",
-            },
-          ]
-        : difficulty === "Medium"
-          ? [
-              ...baseQuiz,
-              {
-                question: "What is the best way to verify election information?",
-                options: ["Check official sources", "Trust all viral posts", "Ask only party workers", "Ignore dates"],
-                answer: 0,
-                explanation: "Official election sources and credible news reports are safer than viral claims.",
-              },
-              {
-                question: "Why should voters compare candidate manifestos?",
-                options: ["To memorize slogans", "To understand promises and priorities", "To avoid voting", "To predict exact results"],
-                answer: 1,
-                explanation: "Manifestos help voters compare policy priorities and promises.",
-              },
-            ]
-        : [
-            ...baseQuiz,
-            {
-              question: "What should a first-time voter carry to the polling station?",
-              options: ["Accepted identity document", "Party poster", "Mobile charger only", "Manifesto booklet"],
-              answer: 0,
-              explanation: "A voter should carry an accepted identity document and follow polling station rules.",
-            },
-            {
-              question: "What does voting by secret ballot mean?",
-              options: ["The vote is private", "The vote is public", "The vote is optional for officials", "The vote is counted later only"],
-              answer: 0,
-              explanation: "A secret ballot protects the privacy of the voter's choice.",
-            },
-          ];
+    const fallback = baseQuiz;
     try {
       const answer = await askGemini(
-        `Create at least 5 ${difficulty} election education MCQs based on this learner's latest AI Tutor prompt: "${chatInput || chatHistory.filter((message) => message.role === "user").at(-1)?.text || learningGoal}".
+        `Create exactly 10 ${difficulty} election education MCQs about this quiz title/topic: "${quizTopic || "elections, democracy, Parliament, Lok Sabha, Rajya Sabha, voting rights, voter verification, and misinformation"}". Use this learner context if helpful: "${chatInput || chatHistory.filter((message) => message.role === "user").at(-1)?.text || learningGoal}".
 Learner level: ${level}
 Region: ${profileRegion}
 Learning goal: ${learningGoal}
 Return only valid JSON array. Shape: [{"question":"...","options":["A","B","C","D"],"answer":0,"explanation":"..."}].
-Make ${difficulty === "Hard" ? 7 : difficulty === "Medium" ? 6 : 5} questions.`,
+Make exactly 10 questions.`,
         JSON.stringify(fallback),
       );
       const parsed = parseQuizJson(answer);
@@ -680,6 +727,25 @@ Make ${difficulty === "Hard" ? 7 : difficulty === "Medium" ? 6 : 5} questions.`,
     } finally {
       setGeneratingQuiz(false);
     }
+  };
+
+  const chooseLearnerPath = (nextLevel: Level, nextGoal: string) => {
+    setLevel(nextLevel);
+    setLearningGoal(nextGoal);
+    setOnboardingVisible(false);
+    localStorage.setItem("civicai-onboarding-seen", "true");
+    setNotice(`Learning path set for ${nextLevel}. Your dashboard is personalized.`);
+  };
+
+  const runDemoMode = () => {
+    setDemoMode(true);
+    setNewsText("Forwarded: secret EVM hack found, share now before voting closes!");
+    setBiasText("Only our party can save the nation. The other side will destroy everything.");
+    setManifestoText("We promise jobs, better schools, healthcare access, clean transport, transparent governance, and safer public spaces.");
+    setChatInput("Explain the Indian voting process for a first-time voter");
+    setProgress({ 0: true, 1: true, 2: true, 3: true });
+    setNotice("Demo mode loaded: open AI Tutor, Voting Simulator, Fake News Detector, and Quiz Lab.");
+    setActiveView("tutor");
   };
 
   return (
@@ -704,6 +770,19 @@ Make ${difficulty === "Hard" ? 7 : difficulty === "Medium" ? 6 : 5} questions.`,
             </button>
           ))}
         </nav>
+        <div className="theme-toggle" aria-label="Theme selector">
+          <span>Light</span>
+          <button
+            type="button"
+            className={themeMode}
+            onClick={() => setThemeMode((current) => (current === "dark" ? "light" : "dark"))}
+            aria-label="Toggle light and dark theme"
+          >
+            <i />
+          </button>
+          <span>Dark</span>
+        </div>
+        {activeView === "settings" && (
         <button
           className={`profile-shortcut ${activeView === "settings" ? "active" : ""}`}
           type="button"
@@ -718,6 +797,7 @@ Make ${difficulty === "Hard" ? 7 : difficulty === "Medium" ? 6 : 5} questions.`,
             <p>{activeSignedInUser ? "Google connected" : `${profileRegion} learner`}</p>
           </div>
         </button>
+        )}
       </aside>
 
       <section className="main-panel">
@@ -742,15 +822,69 @@ Make ${difficulty === "Hard" ? 7 : difficulty === "Medium" ? 6 : 5} questions.`,
             <p>{notice}</p>
           </div>
           <div className="topbar-actions">
+            <button className={demoMode ? "demo-active" : ""} type="button" onClick={runDemoMode}>
+              {demoMode ? "Demo Mode On" : "Start Demo Mode"}
+            </button>
             <button type="button" onClick={() => setActiveView("tutor")}>Open AI Tutor</button>
           </div>
         </header>
 
+        <AnimatePresence mode="wait">
         {activeView === "dashboard" && (
-          <section className="view-stack">
-            <article className="disclaimer-card">
-              <strong>Educational disclaimer</strong>
-              <p>This app is for election learning only. It does not provide official voting advice, party endorsement, or legal election guidance. Always verify critical election information with official election authorities.</p>
+          <motion.section className="view-stack" key="dashboard" initial={{ opacity: 0, y: 16 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -12 }} transition={{ duration: 0.28 }}>
+            <article className="card command-hero">
+              <div>
+                <span className="badge green">CIVIC COMMAND CENTER</span>
+                <h2>Election learning that reacts to every voter journey</h2>
+                <p>Run the AI tutor, generate topic-based quizzes, test misinformation, and simulate voting from one focused workspace.</p>
+                <div className="hero-pills">
+                  <span>AI tutor</span>
+                  <span>10-question quiz</span>
+                  <span>Vote simulator</span>
+                  <span>Misinfo check</span>
+                </div>
+              </div>
+              <div className="hero-actions">
+                <button className="primary-button" type="button" onClick={() => setActiveView("tutor")}>Launch tutor</button>
+                <button className="secondary-button" type="button" onClick={() => setActiveView("quiz")}>Create quiz</button>
+              </div>
+            </article>
+            {onboardingVisible && (
+              <article className="card onboarding-card">
+                <div>
+                  <span className="badge purple">QUICK START</span>
+                  <h2>Build your election learning path</h2>
+                  <p>Pick a learner type and CivicAI will tune the tutor, quiz lab, and suggestions around your goal.</p>
+                </div>
+                <div className="onboarding-actions">
+                  <button type="button" onClick={() => chooseLearnerPath("First-time voter", "Become election-ready")}>
+                    First-time voter
+                  </button>
+                  <button type="button" onClick={() => chooseLearnerPath("School student", "Understand election basics")}>
+                    School student
+                  </button>
+                  <button type="button" onClick={() => chooseLearnerPath("Civic volunteer", "Fight misinformation and explain voting")}>
+                    Civic volunteer
+                  </button>
+                </div>
+              </article>
+            )}
+            <article className="card journey-card">
+              <div className="card-title"><h2>Election-ready journey</h2><span className="badge green">INTERACTIVE</span></div>
+              <div className="journey-steps">
+                {[
+                  { label: "Basics", view: "tutor" as View },
+                  { label: "Voting", view: "simulator" as View },
+                  { label: "Rights", view: "quiz" as View },
+                  { label: "Fake news", view: "detector" as View },
+                  { label: "Badge", view: "quiz" as View },
+                ].map((step, index) => (
+                  <button key={step.label} className={progress[index] ? "complete" : ""} type="button" onClick={() => setActiveView(step.view)}>
+                    <span>{index + 1}</span>
+                    {step.label}
+                  </button>
+                ))}
+              </div>
             </article>
             <div className="metrics-grid">
               <article className="metric-card">
@@ -801,11 +935,11 @@ Make ${difficulty === "Hard" ? 7 : difficulty === "Medium" ? 6 : 5} questions.`,
                 ))}
               </div>
             </article>
-          </section>
+          </motion.section>
         )}
 
         {activeView === "tutor" && (
-          <section className="two-column">
+          <motion.section className="two-column tutor-layout" key="tutor" initial={{ opacity: 0, y: 16 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -12 }} transition={{ duration: 0.28 }}>
             <article className="card tutor-card">
               <div className="card-title"><h2>AI Election Tutor</h2><span className="badge green">VOICE + CHAT</span></div>
               <div className="chat-window">
@@ -814,24 +948,37 @@ Make ${difficulty === "Hard" ? 7 : difficulty === "Medium" ? 6 : 5} questions.`,
                     isReading && message.role === "assistant" && message.text === readingText && index === chatHistory.length - 1;
 
                   return (
-                    <div key={`${message.role}-${index}`} className={`chat ${message.role} ${isActiveReading ? "reading" : ""}`}>
-                      {isActiveReading ? <ReadingText text={message.text} charIndex={readingCharIndex} /> : message.text}
-                    </div>
+                    <motion.div layout key={`${message.role}-${index}`} className={`chat ${message.role} ${isActiveReading ? "reading" : ""}`} initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.24 }}>
+                      {isActiveReading ? <ReadingText text={cleanAiText(message.text)} charIndex={readingCharIndex} /> : <FormattedOutput text={message.text} />}
+                    </motion.div>
                   );
                 })}
+                {aiTyping && <TypingIndicator />}
               </div>
               <div className="chat-input-row">
                 <input value={chatInput} onChange={(event) => setChatInput(event.target.value)} onKeyDown={(event) => event.key === "Enter" && sendChat()} />
                 <button type="button" onClick={startVoiceInput}>{isListening ? "Listening..." : "Mic"}</button>
-                <button type="button" onClick={sendChat}>Send</button>
+                <button type="button" onClick={() => sendChat()}>Send</button>
                 <button type="button" onClick={speakLastAnswer}>Speak</button>
               </div>
             </article>
             <article className="card tutor-side-panel">
               <div className="card-title"><h2>Try these prompts</h2><span className="badge purple">FOLLOW-UP</span></div>
               {["Explain Indian election system", "Who are major parties?", "How does EVM work?", "What are voter rights?"].map((prompt) => (
-                <button className="wide-action" key={prompt} type="button" onClick={() => setChatInput(prompt)}>{prompt}</button>
+                <button className="wide-action" key={prompt} type="button" onClick={() => sendChat(prompt)}>{prompt}</button>
               ))}
+              <div className="key-points-panel">
+                <strong>Answer map</strong>
+                <button type="button" onClick={() => sendChat(`Give me a 5-step timeline for ${profileRegion} election readiness`)}>
+                  Timeline breakdown
+                </button>
+                <button type="button" onClick={() => sendChat("Quiz me after explaining voter rights")}>
+                  Teach then quiz
+                </button>
+                <button type="button" onClick={() => setActiveView("quiz")}>
+                  Open Quiz Lab
+                </button>
+              </div>
               <div className={`reading-guide ${isReading ? "active" : ""}`}>
                 <strong>{isReading ? "AI Tutor is reading now" : "Reading guide"}</strong>
                 <p>Follow the answer in this order while listening:</p>
@@ -843,7 +990,7 @@ Make ${difficulty === "Hard" ? 7 : difficulty === "Medium" ? 6 : 5} questions.`,
                 </ol>
               </div>
             </article>
-          </section>
+          </motion.section>
         )}
 
         {activeView === "simulator" && (
@@ -871,7 +1018,7 @@ Make ${difficulty === "Hard" ? 7 : difficulty === "Medium" ? 6 : 5} questions.`,
               </article>
               <article className="card">
                 <div className="card-title"><h2>AI profile fit</h2><span className="badge purple">GEMINI</span></div>
-                <p>{fitReason || `Based on your goal, ${bestFit.name} may fit your profile because their focus areas include ${bestFit.focus.join(", ")}.`}</p>
+                <FormattedOutput text={fitReason || `Based on your goal, ${bestFit.name} may fit your profile because their focus areas include ${bestFit.focus.join(", ")}.`} />
                 <p className="muted">Secure voting demo ID: {lastVote || "Cast a vote to generate a transparent transaction ID."}</p>
                 <button className="secondary-button" type="button" onClick={() => explainCandidateFit(bestFit)} disabled={fitLoading}>
                   Generate AI fit for best match
@@ -925,26 +1072,70 @@ Make ${difficulty === "Hard" ? 7 : difficulty === "Medium" ? 6 : 5} questions.`,
         {activeView === "bias" && <TextAnalyzer title="Bias Detector" badge="SPEECH CHECK" text={biasText} setText={setBiasText} result={biasResult} run={runBiasCheck} placeholder="Paste political speech, article, or campaign text..." />}
 
         {activeView === "quiz" && (
-          <section className="card">
-            <div className="card-title"><h2>Dynamic Quiz Lab</h2><span className="badge green">SCORE {quizScore}/{quiz.length}</span></div>
-            <div className="compare-controls">
+          <motion.section className="card quiz-lab-card" key="quiz" initial={{ opacity: 0, x: 28, y: 8 }} animate={{ opacity: 1, x: 0, y: 0 }} exit={{ opacity: 0, x: -18 }} transition={{ duration: 0.3, ease: "easeOut" }}>
+            <div className="quiz-topline">
+              <span>Question {Math.min(currentQuizIndex + 1, quiz.length)} of {quiz.length}</span>
+              <span>{answeredCount} answered</span>
+            </div>
+            <div className="quiz-progress-track" aria-hidden="true">
+              <i style={{ width: `${((currentQuizIndex + 1) / Math.max(quiz.length, 1)) * 100}%` }} />
+            </div>
+            <div className="card-title"><h2>Quiz Lab</h2><span className="badge green">SCORE {quizScore}/{quiz.length}</span></div>
+            <div className="compare-controls quiz-controls">
+              <input value={quizTopic} onChange={(event) => setQuizTopic(event.target.value)} placeholder="Enter quiz title or topic" />
               <select value={difficulty} onChange={(event) => setDifficulty(event.target.value as "Easy" | "Medium" | "Hard")}><option>Easy</option><option>Medium</option><option>Hard</option></select>
               <button className="primary-button" type="button" onClick={generateQuiz} disabled={generatingQuiz}>{generatingQuiz ? "Generating..." : "Generate quiz"}</button>
             </div>
-            {quiz.map((question, questionIndex) => (
-              <article className="quiz-card" key={question.question}>
-                <strong>{question.question}</strong>
+            {quizCompleted && (
+              <article className={`certificate-card ${badgeUnlocked ? "unlocked" : ""}`}>
+                <div>
+                  <span className="badge green">{badgeUnlocked ? "BADGE UNLOCKED" : "KEEP LEARNING"}</span>
+                  <h2>{badgeUnlocked ? "CivicAI Election Ready Badge" : "Almost election-ready"}</h2>
+                  <p>{profileName} scored {quizScore}/{quiz.length} in {profileRegion}. {badgeUnlocked ? "You can explain key election safety basics." : "Review the explanations and try again to unlock the badge."}</p>
+                </div>
+                <button type="button" onClick={() => setActiveView("analytics")}>View progress</button>
+              </article>
+            )}
+            <AnimatePresence mode="wait">
+              <motion.article className="quiz-card quiz-question-card quiz-flash-card" key={`${currentQuizIndex}-${currentQuestion.question}`} initial={{ opacity: 0, x: 32, scale: 0.98 }} animate={{ opacity: 1, x: 0, scale: 1 }} exit={{ opacity: 0, x: -24, scale: 0.98 }} transition={{ duration: 0.25 }}>
+                <div className="quiz-question-heading">
+                  <span>{currentQuizIndex + 1}.</span>
+                  <strong>{currentQuestion.question.replace(/^Choose the correct answer:\s*/i, "")}</strong>
+                </div>
                 <div className="option-grid">
-                  {question.options.map((option, optionIndex) => {
-                    const selected = answers[questionIndex];
-                    const className = selected !== undefined && optionIndex === question.answer ? "correct" : selected === optionIndex ? "incorrect" : "";
-                    return <button className={className} key={option} type="button" onClick={() => setAnswers((current) => ({ ...current, [questionIndex]: optionIndex }))}><span>{String.fromCharCode(65 + optionIndex)}</span>{option}</button>;
+                  {currentQuestion.options.map((option, optionIndex) => {
+                    const selected = answers[currentQuizIndex];
+                    const isSelected = selected === optionIndex;
+                    const isCorrect = selected !== undefined && optionIndex === currentQuestion.answer;
+                    const isIncorrect = isSelected && optionIndex !== currentQuestion.answer;
+                    const className = [isSelected ? "selected" : "", isCorrect ? "correct" : "", isIncorrect ? "incorrect" : ""].filter(Boolean).join(" ");
+                    return (
+                      <motion.button
+                        className={className}
+                        key={option}
+                        type="button"
+                        onClick={() => setAnswers((current) => ({ ...current, [currentQuizIndex]: optionIndex }))}
+                        whileHover={{ x: 4 }}
+                        whileTap={{ scale: 0.985 }}
+                      >
+                        <span className="radio-dot" aria-hidden="true" />
+                        {option}
+                      </motion.button>
+                    );
                   })}
                 </div>
-                {answers[questionIndex] !== undefined && <p className="muted">{question.explanation}</p>}
-              </article>
-            ))}
-          </section>
+                {answers[currentQuizIndex] !== undefined && <p className="muted">{currentQuestion.explanation}</p>}
+              </motion.article>
+            </AnimatePresence>
+            <div className="quiz-nav-row">
+              <button className="secondary-button" type="button" onClick={() => setCurrentQuizIndex((current) => Math.max(0, current - 1))} disabled={currentQuizIndex === 0}>
+                Previous
+              </button>
+              <button className="primary-button" type="button" onClick={() => setCurrentQuizIndex((current) => Math.min(quiz.length - 1, current + 1))} disabled={currentQuizIndex >= quiz.length - 1}>
+                Next
+              </button>
+            </div>
+          </motion.section>
         )}
 
         {activeView === "analytics" && (
@@ -956,7 +1147,7 @@ Make ${difficulty === "Hard" ? 7 : difficulty === "Medium" ? 6 : 5} questions.`,
             <article className="card"><div className="card-title"><h2>Bias detector demo</h2><span className="badge red">SPEECH CHECK</span></div><p>This module flags loaded language, one-sided claims, missing sources, and emotional manipulation in election speeches or articles.</p><ProgressBar label="Potential bias in sample claim" value={68} /><VisualCharts values={[68, 22, 10]} labels={["Bias", "Neutral", "Missing"]} /></article>
             <article className="card">
               <div className="card-title"><h2>AI learning insight</h2><span className="badge green">GEMINI</span></div>
-              <p>{analyticsInsight}</p>
+              <FormattedOutput text={analyticsInsight} />
               <button className="primary-button insight-button" type="button" onClick={generateAnalyticsInsight} disabled={analyticsLoading}>
                 {analyticsLoading ? "Generating..." : "Generate AI insight"}
               </button>
@@ -985,9 +1176,10 @@ Make ${difficulty === "Hard" ? 7 : difficulty === "Medium" ? 6 : 5} questions.`,
               }}>Save profile</button>
               {profileSaved && <p className="save-confirmation">✅ Profile updated successfully.</p>}
             </article>
-            <article className="card"><div className="card-title"><h2>Your AI Experience</h2><span className="badge purple">PERSONALIZED</span></div><div className="experience-grid"><article><span>Region</span><strong>{profileRegion}</strong></article><article><span>Level</span><strong>{level}</strong></article><article><span>Focus</span><strong>{learningGoal}</strong></article><article><span>Saved progress</span><strong>{activeSignedInUser ? "Enabled" : "Sign in to enable"}</strong></article></div><div className="settings-block"><strong>Theme</strong><ThemeSwitcher theme={theme} setTheme={setTheme} /></div></article>
+            <article className="card"><div className="card-title"><h2>Your AI Experience</h2><span className="badge purple">PERSONALIZED</span></div><div className="experience-grid"><article><span>Region</span><strong>{profileRegion}</strong></article><article><span>Level</span><strong>{level}</strong></article><article><span>Focus</span><strong>{learningGoal}</strong></article><article><span>Saved progress</span><strong>{activeSignedInUser ? "Enabled" : "Sign in to enable"}</strong></article></div></article>
           </section>
         )}
+        </AnimatePresence>
       </section>
     </main>
   );
@@ -1063,11 +1255,16 @@ function GoogleSignInCard({
 }
 
 function FeatureButton({ title, text, onClick }: { title: string; text: string; onClick: () => void }) {
-  return <button className="feature-button" type="button" onClick={onClick}><strong>{title}</strong><span>{text}</span></button>;
+  return (
+    <motion.button className="feature-button" type="button" onClick={onClick} whileHover={{ y: -5, scale: 1.01 }} whileTap={{ scale: 0.98 }}>
+      <strong>{title}</strong>
+      <span>{text}</span>
+    </motion.button>
+  );
 }
 
 function CandidateReport({ candidate }: { candidate: Candidate }) {
-  return <article className="card candidate-report"><div className="card-title"><h2>{candidate.name}</h2><span className="badge purple">{candidate.party}</span></div><strong>Strengths</strong><ul>{candidate.strengths.map((item) => <li key={item}>{item}</li>)}</ul><strong>Weaknesses</strong><ul>{candidate.weaknesses.map((item) => <li key={item}>{item}</li>)}</ul><strong>Policies</strong>{Object.entries(candidate.policies).map(([key, value]) => <p key={key}><b>{key}:</b> {value}</p>)}</article>;
+  return <motion.article className="card candidate-report" whileHover={{ y: -4 }}><div className="card-title"><h2>{candidate.name}</h2><span className="badge purple">{candidate.party}</span></div><strong>Strengths</strong><ul>{candidate.strengths.map((item) => <li key={item}>{item}</li>)}</ul><strong>Weaknesses</strong><ul>{candidate.weaknesses.map((item) => <li key={item}>{item}</li>)}</ul><strong>Policies</strong>{Object.entries(candidate.policies).map(([key, value]) => <p key={key}><b>{key}:</b> {value}</p>)}</motion.article>;
 }
 
 function TextAnalyzer({ title, badge, text, setText, result, run, placeholder }: { title: string; badge: string; text: string; setText: (text: string) => void; result: string; run: () => void; placeholder: string }) {
@@ -1076,7 +1273,18 @@ function TextAnalyzer({ title, badge, text, setText, result, run, placeholder }:
   const values = isBias ? [64, 24, 12] : isFake ? [58, 28, 14] : [72, 18, 10];
   const labels = isBias ? ["Biased", "Neutral", "Missing"] : isFake ? ["Misleading", "Unclear", "Credible"] : ["Positive", "Neutral", "Risk"];
 
-  return <section className="view-stack"><div className="two-column"><article className="card analyzer-card"><div className="card-title"><h2>{title}</h2><span className="badge red">{badge}</span></div><textarea value={text} onChange={(event) => setText(event.target.value)} placeholder={placeholder} /><button className="primary-button" type="button" onClick={run}>Analyze</button></article><article className="card prompt-card"><div className="card-title"><h2>AI Output</h2><span className="badge green">RESULT</span></div><pre>{result || "Run analysis to see output here."}</pre></article></div>{result && <VisualCharts values={values} labels={labels} />}</section>;
+  return <motion.section className="view-stack analyzer-stack" key={title} initial={{ opacity: 0, y: 16 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -12 }} transition={{ duration: 0.28 }}><article className="card analyzer-card"><div className="card-title"><h2>{title}</h2><span className="badge red">{badge}</span></div><textarea value={text} onChange={(event) => setText(event.target.value)} placeholder={placeholder} /><button className="primary-button" type="button" onClick={run}>Analyze</button></article><article className="card prompt-card"><div className="card-title"><h2>AI Output</h2><span className="badge green">RESULT</span></div><FormattedOutput text={result} fallback="Run analysis to see output here." /></article>{result && <VisualCharts values={values} labels={labels} />}</motion.section>;
+}
+
+function TypingIndicator() {
+  return (
+    <motion.div className="chat assistant typing-indicator" initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }}>
+      <span />
+      <span />
+      <span />
+      AI is thinking
+    </motion.div>
+  );
 }
 
 function ReadingText({ text, charIndex }: { text: string; charIndex: number }) {
