@@ -287,6 +287,56 @@ const parseQuizJson = (text: string) => {
   return parsed.filter((item) => item.question && item.options?.length === 4 && Number.isInteger(item.answer));
 };
 
+const buildTopicQuizFallback = (topic: string): QuizQuestion[] => {
+  const cleanTopic = topic.trim() || "Indian elections";
+  const normalized = cleanTopic.toLowerCase();
+  const isLokSabha = normalized.includes("lok") || normalized.includes("lo sabha");
+  const isRajyaSabha = normalized.includes("rajya");
+  const isParliament = normalized.includes("parliament") || isLokSabha || isRajyaSabha;
+  const isDemocracy = normalized.includes("democracy") || normalized.includes("democratic");
+
+  if (isLokSabha) {
+    return [
+      { question: "What is Lok Sabha also known as?", options: ["Council of States", "House of the People", "State Assembly", "Election Tribunal"], answer: 1, explanation: "Lok Sabha is called the House of the People because its members are directly elected by voters." },
+      { question: "How are Lok Sabha members elected?", options: ["By direct election", "By governors only", "By judges", "By nomination only"], answer: 0, explanation: "Lok Sabha members are directly elected from parliamentary constituencies." },
+      { question: "What is the normal term of Lok Sabha?", options: ["2 years", "5 years", "7 years", "10 years"], answer: 1, explanation: "The normal term is five years unless it is dissolved earlier." },
+      { question: "Who is the presiding officer of Lok Sabha?", options: ["Speaker", "Vice President", "Chief Justice", "Governor"], answer: 0, explanation: "The Speaker presides over Lok Sabha proceedings." },
+      { question: "Which bill is introduced only in Lok Sabha?", options: ["Money Bill", "Private email bill", "State boundary note", "Court appeal"], answer: 0, explanation: "A Money Bill can be introduced only in Lok Sabha." },
+      { question: "What does one Lok Sabha constituency elect?", options: ["One MP", "One MLA", "One mayor", "One judge"], answer: 0, explanation: "Each parliamentary constituency elects one Member of Parliament to Lok Sabha." },
+      { question: "Who forms the Union government after Lok Sabha elections?", options: ["Party or coalition with majority support", "Any losing party", "Only Rajya Sabha members", "Election observers"], answer: 0, explanation: "The party or coalition with majority support in Lok Sabha forms the government." },
+      { question: "What is a vote of no confidence related to?", options: ["Government support in Lok Sabha", "Weather forecast", "Exam results", "Polling booth design"], answer: 0, explanation: "A no-confidence motion tests whether the government still has Lok Sabha support." },
+      { question: "Why is Lok Sabha important in democracy?", options: ["It represents voters directly", "It removes voter rights", "It replaces elections", "It controls all courts"], answer: 0, explanation: "Lok Sabha directly represents citizens through elected MPs." },
+      { question: "Who conducts Lok Sabha elections?", options: ["Election Commission of India", "Local clubs", "Private companies", "Only candidates"], answer: 0, explanation: "The Election Commission of India conducts Lok Sabha elections." },
+    ];
+  }
+
+  if (isRajyaSabha) {
+    return [
+      { question: "What is Rajya Sabha also known as?", options: ["Council of States", "House of the People", "Village Council", "Election Office"], answer: 0, explanation: "Rajya Sabha is called the Council of States." },
+      { question: "How are most Rajya Sabha members elected?", options: ["By elected MLAs", "By direct public vote", "By school students", "By polling officers"], answer: 0, explanation: "Most Rajya Sabha members are elected by elected members of State Legislative Assemblies." },
+      { question: "Is Rajya Sabha a permanent house?", options: ["Yes", "No, it dissolves every year", "Only during elections", "Only in emergencies"], answer: 0, explanation: "Rajya Sabha is a permanent house and is not dissolved." },
+      { question: "How often do one-third of Rajya Sabha members retire?", options: ["Every 2 years", "Every 5 years", "Every month", "Every 10 years"], answer: 0, explanation: "One-third of Rajya Sabha members retire every two years." },
+      { question: "Who is the ex-officio Chairman of Rajya Sabha?", options: ["Vice President of India", "Prime Minister", "Speaker of Lok Sabha", "Chief Election Commissioner"], answer: 0, explanation: "The Vice President of India is the ex-officio Chairman of Rajya Sabha." },
+      { question: "What does Rajya Sabha represent?", options: ["States and union territories", "Only one city", "Only political parties", "Only courts"], answer: 0, explanation: "Rajya Sabha gives representation to states and union territories." },
+      { question: "Can Rajya Sabha discuss and review bills?", options: ["Yes", "No", "Only sports bills", "Only school rules"], answer: 0, explanation: "Rajya Sabha reviews, debates, and can suggest changes to legislation." },
+      { question: "What is the usual term of a Rajya Sabha member?", options: ["6 years", "1 year", "3 months", "Lifetime"], answer: 0, explanation: "A Rajya Sabha member usually serves a six-year term." },
+      { question: "Why is Rajya Sabha important?", options: ["It protects federal representation", "It cancels voting rights", "It replaces courts", "It controls weather"], answer: 0, explanation: "Rajya Sabha helps represent states in national law-making." },
+      { question: "Which Parliament house is indirectly elected?", options: ["Rajya Sabha", "Lok Sabha", "Gram Sabha", "Polling Station"], answer: 0, explanation: "Rajya Sabha is mostly indirectly elected through elected MLAs." },
+    ];
+  }
+
+  if (isParliament || isDemocracy) {
+    return [
+      { question: "What are the two houses of Indian Parliament?", options: ["Lok Sabha and Rajya Sabha", "Vidhan Sabha and Court", "Cabinet and Police", "Mayor and Council"], answer: 0, explanation: "Indian Parliament has Lok Sabha and Rajya Sabha." },
+      { question: "What is the main role of Parliament?", options: ["Make laws and hold government accountable", "Run private companies", "Select movie awards", "Manage schools only"], answer: 0, explanation: "Parliament makes laws, debates issues, passes budgets, and questions the government." },
+      { question: "What is democracy based on?", options: ["People's participation", "Rule by one person", "No elections", "Secret government only"], answer: 0, explanation: "Democracy is based on citizen participation, representation, and accountability." },
+      ...baseQuiz.slice(0, 7),
+    ].slice(0, 10);
+  }
+
+  return baseQuiz.map((item, index) => index < 3 ? { ...item, question: `${cleanTopic}: ${item.question}` } : item);
+};
+
 const getApiError = (status: number, details: string) => {
   if (status === 403) return "Gemini key is blocked or API access is not enabled.";
   if (status === 404) return "Gemini model not found.";
@@ -707,7 +757,7 @@ Suggest next 2 topics and one weak area. Stay educational and non-partisan.`,
     setAnswers({});
     setCurrentQuizIndex(0);
     setGeneratingQuiz(true);
-    const fallback = baseQuiz;
+    const fallback = buildTopicQuizFallback(quizTopic);
     try {
       const answer = await askGemini(
         `Create exactly 10 ${difficulty} election education MCQs about this quiz title/topic: "${quizTopic || "elections, democracy, Parliament, Lok Sabha, Rajya Sabha, voting rights, voter verification, and misinformation"}". Use this learner context if helpful: "${chatInput || chatHistory.filter((message) => message.role === "user").at(-1)?.text || learningGoal}".
