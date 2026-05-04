@@ -258,6 +258,12 @@ const cleanAiText = (text: string) =>
     .replace(/\*/g, "")
     .trim();
 
+const cleanQuizQuestion = (question: string) =>
+  question
+    .replace(/^Choose the correct answer\s*[:.-]\s*/i, "")
+    .replace(/^(Easy|Medium|Hard)(\s+(level|question))?\s*[:.-]\s*/i, "")
+    .trim();
+
 function FormattedOutput({ fallback = "", text }: { fallback?: string; text: string }) {
   const content = cleanAiText(text || fallback);
   return (
@@ -284,10 +290,40 @@ const parseQuizJson = (text: string) => {
   const jsonBlock = text.trim().match(/```json\s*([\s\S]*?)```/i)?.[1];
   const objectText = jsonBlock || text.trim().match(/\[[\s\S]*\]/)?.[0] || text;
   const parsed = JSON.parse(objectText) as QuizQuestion[];
-  return parsed.filter((item) => item.question && item.options?.length === 4 && Number.isInteger(item.answer));
+  return parsed
+    .filter((item) => item.question && item.options?.length === 4 && Number.isInteger(item.answer))
+    .map((item) => ({ ...item, question: cleanQuizQuestion(item.question) }));
 };
 
-const buildTopicQuizFallback = (topic: string): QuizQuestion[] => {
+const tuneQuizDifficulty = (questions: QuizQuestion[], difficulty: "Easy" | "Medium" | "Hard", topic: string): QuizQuestion[] => {
+  if (difficulty === "Easy") {
+    return questions.map((item) => ({
+      ...item,
+      question: item.question,
+      explanation: `${item.explanation} Easy level: this checks the basic fact.`,
+    }));
+  }
+
+  if (difficulty === "Medium") {
+    return questions.map((item, index) => ({
+      ...item,
+      question: index % 2 === 0
+        ? `A voter is studying ${topic}. Which option best applies this idea in real election practice?`
+        : `During a civic awareness session on ${topic}, which answer would correctly guide a first-time voter?`,
+      explanation: `${item.explanation} Medium level: this connects the fact to voter decisions or parliamentary practice.`,
+    }));
+  }
+
+  return questions.map((item, index) => ({
+    ...item,
+    question: index % 2 === 0
+      ? `Which statement best explains the constitutional or democratic importance of ${topic}?`
+      : `Which reasoning best connects ${topic} with accountability, representation, or law-making?`,
+    explanation: `${item.explanation} Hard level: this tests both the fact and the reason it matters in India's democratic system.`,
+  }));
+};
+
+const buildTopicQuizFallback = (topic: string, difficulty: "Easy" | "Medium" | "Hard"): QuizQuestion[] => {
   const cleanTopic = topic.trim() || "Indian elections";
   const normalized = cleanTopic.toLowerCase();
   const isLokSabha = normalized.includes("lok") || normalized.includes("lo sabha");
@@ -295,8 +331,10 @@ const buildTopicQuizFallback = (topic: string): QuizQuestion[] => {
   const isParliament = normalized.includes("parliament") || isLokSabha || isRajyaSabha;
   const isDemocracy = normalized.includes("democracy") || normalized.includes("democratic");
 
+  let questions: QuizQuestion[];
+
   if (isLokSabha) {
-    return [
+    questions = [
       { question: "What is Lok Sabha also known as?", options: ["Council of States", "House of the People", "State Assembly", "Election Tribunal"], answer: 1, explanation: "Lok Sabha is called the House of the People because its members are directly elected by voters." },
       { question: "How are Lok Sabha members elected?", options: ["By direct election", "By governors only", "By judges", "By nomination only"], answer: 0, explanation: "Lok Sabha members are directly elected from parliamentary constituencies." },
       { question: "What is the normal term of Lok Sabha?", options: ["2 years", "5 years", "7 years", "10 years"], answer: 1, explanation: "The normal term is five years unless it is dissolved earlier." },
@@ -308,10 +346,8 @@ const buildTopicQuizFallback = (topic: string): QuizQuestion[] => {
       { question: "Why is Lok Sabha important in democracy?", options: ["It represents voters directly", "It removes voter rights", "It replaces elections", "It controls all courts"], answer: 0, explanation: "Lok Sabha directly represents citizens through elected MPs." },
       { question: "Who conducts Lok Sabha elections?", options: ["Election Commission of India", "Local clubs", "Private companies", "Only candidates"], answer: 0, explanation: "The Election Commission of India conducts Lok Sabha elections." },
     ];
-  }
-
-  if (isRajyaSabha) {
-    return [
+  } else if (isRajyaSabha) {
+    questions = [
       { question: "What is Rajya Sabha also known as?", options: ["Council of States", "House of the People", "Village Council", "Election Office"], answer: 0, explanation: "Rajya Sabha is called the Council of States." },
       { question: "How are most Rajya Sabha members elected?", options: ["By elected MLAs", "By direct public vote", "By school students", "By polling officers"], answer: 0, explanation: "Most Rajya Sabha members are elected by elected members of State Legislative Assemblies." },
       { question: "Is Rajya Sabha a permanent house?", options: ["Yes", "No, it dissolves every year", "Only during elections", "Only in emergencies"], answer: 0, explanation: "Rajya Sabha is a permanent house and is not dissolved." },
@@ -323,18 +359,18 @@ const buildTopicQuizFallback = (topic: string): QuizQuestion[] => {
       { question: "Why is Rajya Sabha important?", options: ["It protects federal representation", "It cancels voting rights", "It replaces courts", "It controls weather"], answer: 0, explanation: "Rajya Sabha helps represent states in national law-making." },
       { question: "Which Parliament house is indirectly elected?", options: ["Rajya Sabha", "Lok Sabha", "Gram Sabha", "Polling Station"], answer: 0, explanation: "Rajya Sabha is mostly indirectly elected through elected MLAs." },
     ];
-  }
-
-  if (isParliament || isDemocracy) {
-    return [
+  } else if (isParliament || isDemocracy) {
+    questions = [
       { question: "What are the two houses of Indian Parliament?", options: ["Lok Sabha and Rajya Sabha", "Vidhan Sabha and Court", "Cabinet and Police", "Mayor and Council"], answer: 0, explanation: "Indian Parliament has Lok Sabha and Rajya Sabha." },
       { question: "What is the main role of Parliament?", options: ["Make laws and hold government accountable", "Run private companies", "Select movie awards", "Manage schools only"], answer: 0, explanation: "Parliament makes laws, debates issues, passes budgets, and questions the government." },
       { question: "What is democracy based on?", options: ["People's participation", "Rule by one person", "No elections", "Secret government only"], answer: 0, explanation: "Democracy is based on citizen participation, representation, and accountability." },
       ...baseQuiz.slice(0, 7),
     ].slice(0, 10);
+  } else {
+    questions = baseQuiz.map((item, index) => index < 3 ? { ...item, question: `${cleanTopic}: ${item.question}` } : item);
   }
 
-  return baseQuiz.map((item, index) => index < 3 ? { ...item, question: `${cleanTopic}: ${item.question}` } : item);
+  return tuneQuizDifficulty(questions, difficulty, cleanTopic);
 };
 
 const getApiError = (status: number, details: string) => {
@@ -757,14 +793,21 @@ Suggest next 2 topics and one weak area. Stay educational and non-partisan.`,
     setAnswers({});
     setCurrentQuizIndex(0);
     setGeneratingQuiz(true);
-    const fallback = buildTopicQuizFallback(quizTopic);
+    const fallback = buildTopicQuizFallback(quizTopic, difficulty);
     try {
       const answer = await askGemini(
         `Create exactly 10 ${difficulty} election education MCQs about this quiz title/topic: "${quizTopic || "elections, democracy, Parliament, Lok Sabha, Rajya Sabha, voting rights, voter verification, and misinformation"}". Use this learner context if helpful: "${chatInput || chatHistory.filter((message) => message.role === "user").at(-1)?.text || learningGoal}".
 Learner level: ${level}
 Region: ${profileRegion}
 Learning goal: ${learningGoal}
+Difficulty meaning:
+Easy = direct factual questions with simple wording.
+Medium = scenario-based questions that connect facts to voter or Parliament practice.
+Hard = reasoning-based questions about democratic importance, constitutional roles, and institutional impact.
+The wording and cognitive level must be clearly different for Easy, Medium, and Hard. Do not reuse the same questions with only small wording changes.
 Return only valid JSON array. Shape: [{"question":"...","options":["A","B","C","D"],"answer":0,"explanation":"..."}].
+Do not start questions with the difficulty label. Never prefix questions with Easy:, Medium:, or Hard:.
+Do not include the difficulty name before any question.
 Make exactly 10 questions.`,
         JSON.stringify(fallback),
       );
@@ -776,6 +819,16 @@ Make exactly 10 questions.`,
       setNotice(`${error instanceof Error ? error.message : "AI unavailable."} Showing quiz fallback.`);
     } finally {
       setGeneratingQuiz(false);
+    }
+  };
+
+  const answerQuizOption = (optionIndex: number) => {
+    const isCorrect = optionIndex === currentQuestion.answer;
+    setAnswers((current) => ({ ...current, [currentQuizIndex]: optionIndex }));
+    if (isCorrect && currentQuizIndex < quiz.length - 1) {
+      window.setTimeout(() => {
+        setCurrentQuizIndex((current) => Math.min(quiz.length - 1, current + 1));
+      }, 650);
     }
   };
 
@@ -1150,7 +1203,7 @@ Make exactly 10 questions.`,
               <motion.article className="quiz-card quiz-question-card quiz-flash-card" key={`${currentQuizIndex}-${currentQuestion.question}`} initial={{ opacity: 0, x: 32, scale: 0.98 }} animate={{ opacity: 1, x: 0, scale: 1 }} exit={{ opacity: 0, x: -24, scale: 0.98 }} transition={{ duration: 0.25 }}>
                 <div className="quiz-question-heading">
                   <span>{currentQuizIndex + 1}.</span>
-                  <strong>{currentQuestion.question.replace(/^Choose the correct answer:\s*/i, "")}</strong>
+                  <strong>{cleanQuizQuestion(currentQuestion.question)}</strong>
                 </div>
                 <div className="option-grid">
                   {currentQuestion.options.map((option, optionIndex) => {
@@ -1164,7 +1217,7 @@ Make exactly 10 questions.`,
                         className={className}
                         key={option}
                         type="button"
-                        onClick={() => setAnswers((current) => ({ ...current, [currentQuizIndex]: optionIndex }))}
+                        onClick={() => answerQuizOption(optionIndex)}
                         whileHover={{ x: 4 }}
                         whileTap={{ scale: 0.985 }}
                       >
